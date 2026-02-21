@@ -4,7 +4,7 @@
     "version": "1.0",
     "build_number": "1",
     "icon": "AppIcon",
-    "api_port": 8767,
+    "api_port": 8770,
     "cache_db": "cache.db",
     "connection_name": "DemoAcct"
 }

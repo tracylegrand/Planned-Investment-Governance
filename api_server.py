@@ -126,15 +126,19 @@ def init_cache_db():
             next_approver_name TEXT,
             next_approver_title TEXT,
             dm_approved_by TEXT,
+            dm_approved_by_title TEXT,
             dm_approved_at TEXT,
             dm_comments TEXT,
             rd_approved_by TEXT,
+            rd_approved_by_title TEXT,
             rd_approved_at TEXT,
             rd_comments TEXT,
             avp_approved_by TEXT,
+            avp_approved_by_title TEXT,
             avp_approved_at TEXT,
             avp_comments TEXT,
             gvp_approved_by TEXT,
+            gvp_approved_by_title TEXT,
             gvp_approved_at TEXT,
             gvp_comments TEXT,
             updated_at TEXT
@@ -342,9 +346,9 @@ def refresh_investment_requests_cache():
                    REQUESTED_AMOUNT, INVESTMENT_QUARTER, BUSINESS_JUSTIFICATION, EXPECTED_OUTCOME,
                    RISK_ASSESSMENT, CREATED_BY, CREATED_BY_NAME, CREATED_BY_EMPLOYEE_ID, CREATED_AT,
                    THEATER, INDUSTRY_SEGMENT, STATUS, CURRENT_APPROVAL_LEVEL, NEXT_APPROVER_ID,
-                   NEXT_APPROVER_NAME, NEXT_APPROVER_TITLE, DM_APPROVED_BY, DM_APPROVED_AT, DM_COMMENTS,
-                   RD_APPROVED_BY, RD_APPROVED_AT, RD_COMMENTS, AVP_APPROVED_BY, AVP_APPROVED_AT,
-                   AVP_COMMENTS, GVP_APPROVED_BY, GVP_APPROVED_AT, GVP_COMMENTS, UPDATED_AT
+                   NEXT_APPROVER_NAME, NEXT_APPROVER_TITLE, DM_APPROVED_BY, DM_APPROVED_BY_TITLE, DM_APPROVED_AT, DM_COMMENTS,
+                   RD_APPROVED_BY, RD_APPROVED_BY_TITLE, RD_APPROVED_AT, RD_COMMENTS, AVP_APPROVED_BY, AVP_APPROVED_BY_TITLE,
+                   AVP_APPROVED_AT, AVP_COMMENTS, GVP_APPROVED_BY, GVP_APPROVED_BY_TITLE, GVP_APPROVED_AT, GVP_COMMENTS, UPDATED_AT
             FROM TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
             ORDER BY CREATED_AT DESC
         """)
@@ -360,7 +364,7 @@ def refresh_investment_requests_cache():
         cache_cur.execute("DELETE FROM cached_investment_requests")
         cache_cur.executemany(
             """INSERT OR REPLACE INTO cached_investment_requests VALUES
-               (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [convert_row(row) for row in rows]
         )
         cache_conn.commit()
@@ -374,6 +378,35 @@ def refresh_investment_requests_cache():
         sf_conn.close()
         cache_conn.close()
 
+def refresh_accounts_cache():
+    update_progress("accounts", 2, "Loading SFDC accounts...")
+    print("Refreshing accounts cache...")
+    sf_conn = get_snowflake_connection()
+    cache_conn = get_cache_connection()
+    try:
+        sf_cur = sf_conn.cursor()
+        sf_cur.execute("""
+            SELECT ACCOUNT_ID, ACCOUNT_NAME, THEATER, INDUSTRY
+            FROM SFDC_SHARED.SFDC_VIEWS.ACCOUNTS
+            WHERE ACCOUNT_NAME IS NOT NULL
+            ORDER BY ACCOUNT_NAME
+        """)
+        rows = sf_cur.fetchall()
+        
+        cache_cur = cache_conn.cursor()
+        cache_cur.execute("DELETE FROM cached_accounts")
+        cache_cur.executemany(
+            "INSERT OR REPLACE INTO cached_accounts VALUES (?, ?, ?, ?)",
+            rows
+        )
+        cache_conn.commit()
+        print(f"Cached {len(rows)} accounts")
+    except Exception as e:
+        print(f"Error refreshing accounts cache: {e}")
+    finally:
+        sf_conn.close()
+        cache_conn.close()
+
 def full_cache_refresh():
     print("Starting full cache refresh...")
     with cache_lock:
@@ -381,6 +414,7 @@ def full_cache_refresh():
             refresh_users_cache()
             refresh_current_user_cache()
             refresh_investment_requests_cache()
+            refresh_accounts_cache()
             
             with progress_lock:
                 cache_progress["status"] = "complete"
@@ -504,6 +538,27 @@ def get_summary():
     finally:
         cache_conn.close()
 
+@app.route('/api/budgets')
+def get_budgets():
+    sf_conn = get_snowflake_connection()
+    try:
+        cur = sf_conn.cursor()
+        cur.execute("""
+            SELECT BUDGET_ID, FISCAL_YEAR, THEATER, INDUSTRY_SEGMENT, PORTFOLIO, BUDGET_AMOUNT, ALLOCATED_AMOUNT,
+                   Q1_BUDGET, Q2_BUDGET, Q3_BUDGET, Q4_BUDGET
+            FROM TEMP.INVESTMENT_GOVERNANCE.ANNUAL_BUDGETS
+            ORDER BY FISCAL_YEAR DESC, THEATER, INDUSTRY_SEGMENT
+        """)
+        rows = cur.fetchall()
+        columns = ['BUDGET_ID', 'FISCAL_YEAR', 'THEATER', 'INDUSTRY_SEGMENT', 'PORTFOLIO', 'BUDGET_AMOUNT', 'ALLOCATED_AMOUNT',
+                   'Q1_BUDGET', 'Q2_BUDGET', 'Q3_BUDGET', 'Q4_BUDGET']
+        return jsonify([dict(zip(columns, [float(v) if isinstance(v, Decimal) else v for v in row])) for row in rows])
+    except Exception as e:
+        print(f"Error fetching budgets: {e}")
+        return jsonify([])
+    finally:
+        sf_conn.close()
+
 @app.route('/api/requests')
 def get_requests():
     theater = request.args.get('theater')
@@ -561,15 +616,19 @@ def get_requests():
                 "NEXT_APPROVER_NAME": row["next_approver_name"],
                 "NEXT_APPROVER_TITLE": row["next_approver_title"],
                 "DM_APPROVED_BY": row["dm_approved_by"],
+                "DM_APPROVED_BY_TITLE": row["dm_approved_by_title"],
                 "DM_APPROVED_AT": row["dm_approved_at"],
                 "DM_COMMENTS": row["dm_comments"],
                 "RD_APPROVED_BY": row["rd_approved_by"],
+                "RD_APPROVED_BY_TITLE": row["rd_approved_by_title"],
                 "RD_APPROVED_AT": row["rd_approved_at"],
                 "RD_COMMENTS": row["rd_comments"],
                 "AVP_APPROVED_BY": row["avp_approved_by"],
+                "AVP_APPROVED_BY_TITLE": row["avp_approved_by_title"],
                 "AVP_APPROVED_AT": row["avp_approved_at"],
                 "AVP_COMMENTS": row["avp_comments"],
                 "GVP_APPROVED_BY": row["gvp_approved_by"],
+                "GVP_APPROVED_BY_TITLE": row["gvp_approved_by_title"],
                 "GVP_APPROVED_AT": row["gvp_approved_at"],
                 "GVP_COMMENTS": row["gvp_comments"],
                 "UPDATED_AT": row["updated_at"]
@@ -613,15 +672,19 @@ def get_request(request_id):
             "NEXT_APPROVER_NAME": row["next_approver_name"],
             "NEXT_APPROVER_TITLE": row["next_approver_title"],
             "DM_APPROVED_BY": row["dm_approved_by"],
+            "DM_APPROVED_BY_TITLE": row["dm_approved_by_title"],
             "DM_APPROVED_AT": row["dm_approved_at"],
             "DM_COMMENTS": row["dm_comments"],
             "RD_APPROVED_BY": row["rd_approved_by"],
+            "RD_APPROVED_BY_TITLE": row["rd_approved_by_title"],
             "RD_APPROVED_AT": row["rd_approved_at"],
             "RD_COMMENTS": row["rd_comments"],
             "AVP_APPROVED_BY": row["avp_approved_by"],
+            "AVP_APPROVED_BY_TITLE": row["avp_approved_by_title"],
             "AVP_APPROVED_AT": row["avp_approved_at"],
             "AVP_COMMENTS": row["avp_comments"],
             "GVP_APPROVED_BY": row["gvp_approved_by"],
+            "GVP_APPROVED_BY_TITLE": row["gvp_approved_by_title"],
             "GVP_APPROVED_AT": row["gvp_approved_at"],
             "GVP_COMMENTS": row["gvp_comments"],
             "UPDATED_AT": row["updated_at"]
@@ -817,10 +880,10 @@ def withdraw_request(request_id):
         cur.execute("""
             UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
             SET STATUS = 'DRAFT', CURRENT_APPROVAL_LEVEL = 0,
-                DM_APPROVED_BY = NULL, DM_APPROVED_AT = NULL, DM_COMMENTS = NULL,
-                RD_APPROVED_BY = NULL, RD_APPROVED_AT = NULL, RD_COMMENTS = NULL,
-                AVP_APPROVED_BY = NULL, AVP_APPROVED_AT = NULL, AVP_COMMENTS = NULL,
-                GVP_APPROVED_BY = NULL, GVP_APPROVED_AT = NULL, GVP_COMMENTS = NULL,
+                DM_APPROVED_BY = NULL, DM_APPROVED_BY_TITLE = NULL, DM_APPROVED_AT = NULL, DM_COMMENTS = NULL,
+                RD_APPROVED_BY = NULL, RD_APPROVED_BY_TITLE = NULL, RD_APPROVED_AT = NULL, RD_COMMENTS = NULL,
+                AVP_APPROVED_BY = NULL, AVP_APPROVED_BY_TITLE = NULL, AVP_APPROVED_AT = NULL, AVP_COMMENTS = NULL,
+                GVP_APPROVED_BY = NULL, GVP_APPROVED_BY_TITLE = NULL, GVP_APPROVED_AT = NULL, GVP_COMMENTS = NULL,
                 UPDATED_AT = CURRENT_TIMESTAMP()
             WHERE REQUEST_ID = %s
         """, (request_id,))
@@ -847,9 +910,10 @@ def approve_request(request_id):
         cur.execute("SELECT CURRENT_USER()")
         current_user = cur.fetchone()[0]
         
-        cur.execute("SELECT DISPLAY_NAME FROM TEMP.INVESTMENT_GOVERNANCE.USERS WHERE SNOWFLAKE_USERNAME = %s", (current_user,))
+        cur.execute("SELECT DISPLAY_NAME, TITLE FROM TEMP.INVESTMENT_GOVERNANCE.VW_CURRENT_USER_INFO")
         user_row = cur.fetchone()
         approver_name = user_row[0] if user_row else current_user
+        approver_title = user_row[1] if user_row and len(user_row) > 1 else None
         
         cur.execute("SELECT STATUS, CURRENT_APPROVAL_LEVEL FROM TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS WHERE REQUEST_ID = %s", (request_id,))
         row = cur.fetchone()
@@ -860,23 +924,23 @@ def approve_request(request_id):
         current_level = row[1] or 0
         
         status_transitions = {
-            'SUBMITTED': ('DM_APPROVED', 'DM_APPROVED_BY', 'DM_APPROVED_AT', 'DM_COMMENTS', 2),
-            'DM_APPROVED': ('RD_APPROVED', 'RD_APPROVED_BY', 'RD_APPROVED_AT', 'RD_COMMENTS', 3),
-            'RD_APPROVED': ('AVP_APPROVED', 'AVP_APPROVED_BY', 'AVP_APPROVED_AT', 'AVP_COMMENTS', 4),
-            'AVP_APPROVED': ('FINAL_APPROVED', 'GVP_APPROVED_BY', 'GVP_APPROVED_AT', 'GVP_COMMENTS', 5)
+            'SUBMITTED': ('DM_APPROVED', 'DM_APPROVED_BY', 'DM_APPROVED_BY_TITLE', 'DM_APPROVED_AT', 'DM_COMMENTS', 2),
+            'DM_APPROVED': ('RD_APPROVED', 'RD_APPROVED_BY', 'RD_APPROVED_BY_TITLE', 'RD_APPROVED_AT', 'RD_COMMENTS', 3),
+            'RD_APPROVED': ('AVP_APPROVED', 'AVP_APPROVED_BY', 'AVP_APPROVED_BY_TITLE', 'AVP_APPROVED_AT', 'AVP_COMMENTS', 4),
+            'AVP_APPROVED': ('FINAL_APPROVED', 'GVP_APPROVED_BY', 'GVP_APPROVED_BY_TITLE', 'GVP_APPROVED_AT', 'GVP_COMMENTS', 5)
         }
         
         if current_status not in status_transitions:
             return jsonify({"error": "Request cannot be approved in current status"}), 400
         
-        new_status, approver_col, time_col, comments_col, new_level = status_transitions[current_status]
+        new_status, approver_col, title_col, time_col, comments_col, new_level = status_transitions[current_status]
         
         cur.execute(f"""
             UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
-            SET STATUS = %s, {approver_col} = %s, {time_col} = CURRENT_TIMESTAMP(), {comments_col} = %s,
+            SET STATUS = %s, {approver_col} = %s, {title_col} = %s, {time_col} = CURRENT_TIMESTAMP(), {comments_col} = %s,
                 CURRENT_APPROVAL_LEVEL = %s, UPDATED_AT = CURRENT_TIMESTAMP()
             WHERE REQUEST_ID = %s
-        """, (new_status, approver_name, comments, new_level, request_id))
+        """, (new_status, approver_name, approver_title, comments, new_level, request_id))
         sf_conn.commit()
         
         invalidate_timestamps_cache()
@@ -926,13 +990,14 @@ def search_accounts():
     if len(query) < 2:
         return jsonify([])
     
-    sf_conn = get_snowflake_connection()
+    cache_conn = get_cache_connection()
     try:
-        cur = sf_conn.cursor()
+        cur = cache_conn.cursor()
         cur.execute("""
-            SELECT ACCOUNT_ID, ACCOUNT_NAME, THEATER, INDUSTRY
-            FROM SFDC_SHARED.SFDC_VIEWS.ACCOUNTS
-            WHERE UPPER(ACCOUNT_NAME) LIKE UPPER(%s)
+            SELECT account_id, account_name, theater, industry_segment
+            FROM cached_accounts
+            WHERE UPPER(account_name) LIKE UPPER(?)
+            ORDER BY account_name
             LIMIT 20
         """, (f'%{query}%',))
         rows = cur.fetchall()
@@ -944,10 +1009,10 @@ def search_accounts():
             "INDUSTRY_SEGMENT": row[3]
         } for row in rows])
     except Exception as e:
-        print(f"Error searching accounts: {e}")
+        print(f"Error searching accounts from cache: {e}")
         return jsonify([])
     finally:
-        sf_conn.close()
+        cache_conn.close()
 
 @app.route('/api/accounts/<account_id>/opportunities')
 def get_account_opportunities(account_id):

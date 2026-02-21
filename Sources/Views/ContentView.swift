@@ -18,14 +18,6 @@ struct ContentView: View {
                     InvestmentRequestsView(navigationState: navigationState)
                         .tabItem { Label("Requests", systemImage: "list.bullet.rectangle.fill") }
                         .tag(1)
-                    
-                    ApprovalsView(navigationState: navigationState)
-                        .tabItem { Label("Approvals", systemImage: "checkmark.circle") }
-                        .tag(2)
-                    
-                    ReportingView()
-                        .tabItem { Label("Reporting", systemImage: "chart.line.uptrend.xyaxis") }
-                        .tag(3)
                 }
                 .padding(.top, 8)
             }

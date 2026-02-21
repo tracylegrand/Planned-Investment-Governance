@@ -308,16 +308,16 @@ struct ApprovalDetailSheet: View {
                     GroupBox("Approval History") {
                         VStack(alignment: .leading, spacing: 8) {
                             if let dmApprover = request.dmApprovedBy {
-                                ApprovalHistoryRow(level: "DM", approver: dmApprover, date: request.dmApprovedAt, comments: request.dmComments)
+                                ApprovalHistoryRow(level: "DM", approverName: dmApprover, approverTitle: request.dmApprovedByTitle, approvedAt: request.dmApprovedAt, comments: request.dmComments)
                             }
                             if let rdApprover = request.rdApprovedBy {
-                                ApprovalHistoryRow(level: "RD", approver: rdApprover, date: request.rdApprovedAt, comments: request.rdComments)
+                                ApprovalHistoryRow(level: "RD", approverName: rdApprover, approverTitle: request.rdApprovedByTitle, approvedAt: request.rdApprovedAt, comments: request.rdComments)
                             }
                             if let avpApprover = request.avpApprovedBy {
-                                ApprovalHistoryRow(level: "AVP", approver: avpApprover, date: request.avpApprovedAt, comments: request.avpComments)
+                                ApprovalHistoryRow(level: "AVP", approverName: avpApprover, approverTitle: request.avpApprovedByTitle, approvedAt: request.avpApprovedAt, comments: request.avpComments)
                             }
                             if let gvpApprover = request.gvpApprovedBy {
-                                ApprovalHistoryRow(level: "GVP", approver: gvpApprover, date: request.gvpApprovedAt, comments: request.gvpComments)
+                                ApprovalHistoryRow(level: "GVP/Final", approverName: gvpApprover, approverTitle: request.gvpApprovedByTitle, approvedAt: request.gvpApprovedAt, comments: request.gvpComments)
                             }
                             
                             if request.dmApprovedBy == nil && request.rdApprovedBy == nil && request.avpApprovedBy == nil && request.gvpApprovedBy == nil {
@@ -408,34 +408,63 @@ struct ApprovalDetailSheet: View {
 
 struct ApprovalHistoryRow: View {
     let level: String
-    let approver: String
-    let date: Date?
+    let approverName: String
+    let approverTitle: String?
+    let approvedAt: Date?
     let comments: String?
     
+    private var formattedDate: String {
+        guard let date = approvedAt else { return "" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+    
     var body: some View {
-        HStack(alignment: .top) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("\(level) Approved by \(approver)")
-                        .fontWeight(.medium)
-                    
-                    Spacer()
-                    
-                    if let date = date {
-                        Text(date, style: .date)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
                 
-                if let comments = comments, !comments.isEmpty {
-                    Text(comments)
+                Text("\(level) Approved")
+                    .fontWeight(.medium)
+                
+                Spacer()
+                
+                if approvedAt != nil {
+                    Text(formattedDate)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+            }
+            
+            HStack(alignment: .top, spacing: 4) {
+                Text(approverName)
+                    .font(.subheadline)
+                
+                if let title = approverTitle, !title.isEmpty {
+                    Text("•")
+                        .foregroundColor(.secondary)
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.leading, 28)
+            
+            if let comment = comments, !comment.isEmpty {
+                HStack(alignment: .top) {
+                    Image(systemName: "text.quote")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(comment)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .italic()
+                }
+                .padding(.leading, 28)
+                .padding(.top, 2)
             }
         }
         .padding(.vertical, 4)

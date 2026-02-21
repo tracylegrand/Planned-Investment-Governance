@@ -3,13 +3,14 @@ import Foundation
 class DataService: ObservableObject {
     static let shared = DataService()
     
-    private let baseURL = "http://127.0.0.1:8767/api"
+    private let baseURL = "http://127.0.0.1:8770/api"
     private let session = URLSession.shared
     private var serverProcess: Process?
     private var progressTimer: Timer?
     
     @Published var currentUser: User?
     @Published var investmentRequests: [InvestmentRequest] = []
+    @Published var annualBudgets: [AnnualBudget] = []
     @Published var summary: InvestmentSummary?
     @Published var isLoading = false
     @Published var lastError: String?
@@ -52,7 +53,7 @@ class DataService: ObservableObject {
                 return
             }
             
-            let healthURL = URL(string: "http://localhost:8767/api/health")!
+            let healthURL = URL(string: "http://localhost:8770/api/health")!
             let request = URLRequest(url: healthURL, timeoutInterval: 2)
             
             session.dataTask(with: request) { [weak self] _, response, error in
@@ -120,7 +121,7 @@ class DataService: ObservableObject {
             serverProcess = process
             
             DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
-                let healthURL = URL(string: "http://localhost:8767/api/health")!
+                let healthURL = URL(string: "http://localhost:8770/api/health")!
                 let request = URLRequest(url: healthURL, timeoutInterval: 2)
                 
                 self.session.dataTask(with: request) { _, response, _ in
@@ -145,7 +146,7 @@ class DataService: ObservableObject {
             self.cacheProgress.message = "Starting API server..."
         }
         
-        let healthURL = URL(string: "http://127.0.0.1:8767/api/health")!
+        let healthURL = URL(string: "http://127.0.0.1:8770/api/health")!
         var serverStarted = false
         
         func tryConnect(attempt: Int) {
@@ -176,6 +177,7 @@ class DataService: ObservableObject {
                     self.loadCurrentUser {}
                     self.loadSummary {}
                     self.loadInvestmentRequests {}
+                    self.loadAnnualBudgets {}
                 } else {
                     if !serverStarted {
                         serverStarted = true
@@ -233,6 +235,9 @@ class DataService: ObservableObject {
         
         group.enter()
         self.loadInvestmentRequests { group.leave() }
+        
+        group.enter()
+        self.loadAnnualBudgets { group.leave() }
         
         group.notify(queue: .main) {
             completion()
@@ -380,6 +385,26 @@ class DataService: ObservableObject {
                     self.investmentRequests = try self.decoder.decode([InvestmentRequest].self, from: data)
                 } catch {
                     print("Error decoding investment requests: \(error)")
+                }
+            }
+        }.resume()
+    }
+    
+    func loadAnnualBudgets(completion: @escaping () -> Void = {}) {
+        guard let url = URL(string: "\(baseURL)/budgets") else {
+            completion()
+            return
+        }
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                defer { completion() }
+                guard let self = self, let data = data else { return }
+                
+                do {
+                    self.annualBudgets = try self.decoder.decode([AnnualBudget].self, from: data)
+                } catch {
+                    print("Error decoding annual budgets: \(error)")
                 }
             }
         }.resume()

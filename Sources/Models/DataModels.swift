@@ -61,15 +61,19 @@ struct InvestmentRequest: Codable, Identifiable {
     let nextApproverName: String?
     let nextApproverTitle: String?
     let dmApprovedBy: String?
+    let dmApprovedByTitle: String?
     let dmApprovedAt: Date?
     let dmComments: String?
     let rdApprovedBy: String?
+    let rdApprovedByTitle: String?
     let rdApprovedAt: Date?
     let rdComments: String?
     let avpApprovedBy: String?
+    let avpApprovedByTitle: String?
     let avpApprovedAt: Date?
     let avpComments: String?
     let gvpApprovedBy: String?
+    let gvpApprovedByTitle: String?
     let gvpApprovedAt: Date?
     let gvpComments: String?
     let updatedAt: Date?
@@ -125,15 +129,19 @@ struct InvestmentRequest: Codable, Identifiable {
         case nextApproverName = "NEXT_APPROVER_NAME"
         case nextApproverTitle = "NEXT_APPROVER_TITLE"
         case dmApprovedBy = "DM_APPROVED_BY"
+        case dmApprovedByTitle = "DM_APPROVED_BY_TITLE"
         case dmApprovedAt = "DM_APPROVED_AT"
         case dmComments = "DM_COMMENTS"
         case rdApprovedBy = "RD_APPROVED_BY"
+        case rdApprovedByTitle = "RD_APPROVED_BY_TITLE"
         case rdApprovedAt = "RD_APPROVED_AT"
         case rdComments = "RD_COMMENTS"
         case avpApprovedBy = "AVP_APPROVED_BY"
+        case avpApprovedByTitle = "AVP_APPROVED_BY_TITLE"
         case avpApprovedAt = "AVP_APPROVED_AT"
         case avpComments = "AVP_COMMENTS"
         case gvpApprovedBy = "GVP_APPROVED_BY"
+        case gvpApprovedByTitle = "GVP_APPROVED_BY_TITLE"
         case gvpApprovedAt = "GVP_APPROVED_AT"
         case gvpComments = "GVP_COMMENTS"
         case updatedAt = "UPDATED_AT"
@@ -279,9 +287,42 @@ struct InvestmentSummary: Codable {
     }
 }
 
+struct AnnualBudget: Codable, Identifiable {
+    let budgetId: Int
+    let fiscalYear: String
+    let theater: String
+    let industrySegment: String
+    let portfolio: String?
+    let budgetAmount: Double
+    let allocatedAmount: Double
+    let q1Budget: Double
+    let q2Budget: Double
+    let q3Budget: Double
+    let q4Budget: Double
+    
+    var id: Int { budgetId }
+    
+    enum CodingKeys: String, CodingKey {
+        case budgetId = "BUDGET_ID"
+        case fiscalYear = "FISCAL_YEAR"
+        case theater = "THEATER"
+        case industrySegment = "INDUSTRY_SEGMENT"
+        case portfolio = "PORTFOLIO"
+        case budgetAmount = "BUDGET_AMOUNT"
+        case allocatedAmount = "ALLOCATED_AMOUNT"
+        case q1Budget = "Q1_BUDGET"
+        case q2Budget = "Q2_BUDGET"
+        case q3Budget = "Q3_BUDGET"
+        case q4Budget = "Q4_BUDGET"
+    }
+}
+
 class NavigationState: ObservableObject {
     @Published var selectedTab: Int = 0
     @Published var selectedRequestId: Int? = nil
     @Published var showingRequestDetail: Bool = false
     @Published var showingNewRequest: Bool = false
+    @Published var filterPendingMyApproval: Bool = false
+    @Published var passedStatus: String = ""
+    @Published var passedFiscalYear: String = ""
 }
