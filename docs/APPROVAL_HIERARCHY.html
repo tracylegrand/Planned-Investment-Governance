@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investment Governance - Approval Hierarchy</title>
+<style>
+:root {
+    --snow-blue: #29B5E8;
+    --snow-dark: #11567F;
+    --snow-navy: #0D2B45;
+    --snow-light: #E8F7FC;
+    --bg: #F6F8FA;
+    --card-bg: #FFFFFF;
+    --text: #1E293B;
+    --text-muted: #64748B;
+    --border: #E2E8F0;
+    --green: #10B981;
+    --amber: #F59E0B;
+    --red: #EF4444;
+    --purple: #8B5CF6;
+    --orange: #F97316;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.header { background: linear-gradient(135deg, var(--snow-navy) 0%, var(--snow-dark) 100%); color: white; padding: 48px 0; text-align: center; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 8px; }
+.header p { font-size: 1.1rem; opacity: 0.85; max-width: 700px; margin: 0 auto; }
+.container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+.nav-bar { display: flex; gap: 12px; margin-bottom: 32px; flex-wrap: wrap; }
+.nav-bar a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: var(--snow-dark); font-weight: 500; font-size: 0.9rem; transition: all 0.2s; }
+.nav-bar a:hover { border-color: var(--snow-blue); background: var(--snow-light); }
+.nav-bar a.active { background: var(--snow-blue); color: white; border-color: var(--snow-blue); }
+h2 { font-size: 1.5rem; font-weight: 700; color: var(--snow-navy); margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--snow-blue); }
+h3 { font-size: 1.15rem; font-weight: 600; color: var(--snow-dark); margin: 24px 0 12px; }
+.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+th { background: var(--snow-navy); color: white; padding: 10px 14px; text-align: left; font-weight: 600; }
+th:first-child { border-radius: 8px 0 0 0; }
+th:last-child { border-radius: 0 8px 0 0; }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--snow-light); }
+code { background: #F1F5F9; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; color: var(--snow-dark); font-family: 'SF Mono', 'Fira Code', monospace; }
+.section-intro { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 20px; line-height: 1.7; }
+
+.hierarchy-diagram { background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 16px; padding: 40px 32px; margin: 24px 0; }
+.hierarchy-title { color: white; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 24px; text-align: center; opacity: 0.6; }
+
+.h-level { display: flex; align-items: center; gap: 16px; margin: 0; padding: 0; }
+.h-level-num { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.1rem; flex-shrink: 0; }
+.h-level-card { flex: 1; border-radius: 12px; padding: 16px 20px; border: 2px solid; display: flex; align-items: center; justify-content: space-between; }
+.h-level-card .hlc-left h4 { font-size: 1rem; margin-bottom: 2px; }
+.h-level-card .hlc-left .hlc-role { font-size: 0.82rem; opacity: 0.7; }
+.h-level-card .hlc-right { text-align: right; font-size: 0.82rem; opacity: 0.7; }
+.h-level-card .hlc-right .hlc-action { font-weight: 600; opacity: 1; font-size: 0.85rem; }
+.h-connector { display: flex; align-items: center; gap: 16px; padding: 0; margin: 0; }
+.h-connector-line { width: 44px; display: flex; justify-content: center; flex-shrink: 0; }
+.h-connector-line .vline { width: 3px; height: 24px; border-radius: 2px; }
+.h-connector-label { font-size: 0.78rem; color: rgba(255,255,255,0.4); padding-left: 20px; }
+
+.routing-diagram { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 20px 0; }
+.route-step { display: flex; align-items: flex-start; gap: 16px; padding: 12px 0; }
+.route-step:not(:last-child) { border-bottom: 1px dashed var(--border); }
+.route-num { width: 32px; height: 32px; border-radius: 50%; background: var(--snow-blue); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; flex-shrink: 0; }
+.route-content h4 { font-size: 0.95rem; color: var(--snow-dark); margin-bottom: 4px; }
+.route-content p { font-size: 0.85rem; color: var(--text-muted); }
+.route-content code { font-size: 0.8em; }
+
+.action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 16px 0; }
+.action-card { border-radius: 10px; padding: 18px; border: 1px solid var(--border); border-left: 4px solid; }
+.action-card h4 { font-size: 0.95rem; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.action-card p { font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; }
+.action-card .a-result { margin-top: 8px; font-size: 0.82rem; }
+
+.viewer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 16px 0; }
+.viewer-card { background: #F8FAFC; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; }
+.viewer-card h4 { font-size: 0.9rem; color: var(--snow-dark); margin-bottom: 4px; }
+.viewer-card .scope { font-size: 0.78rem; font-weight: 600; color: var(--snow-blue); margin-bottom: 4px; }
+.viewer-card p { font-size: 0.82rem; color: var(--text-muted); }
+
+.example-timeline { margin: 20px 0; }
+.et-step { display: flex; gap: 16px; position: relative; padding-bottom: 0; }
+.et-step:not(:last-child) { padding-bottom: 20px; }
+.et-step:not(:last-child)::before { content: ''; position: absolute; left: 19px; top: 40px; bottom: 0; width: 2px; background: var(--border); }
+.et-dot { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; flex-shrink: 0; border: 3px solid; }
+.et-content { flex: 1; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; }
+.et-content h4 { font-size: 0.9rem; margin-bottom: 2px; }
+.et-content .et-detail { font-size: 0.82rem; color: var(--text-muted); }
+.et-content .et-fields { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.et-content .et-field { background: #F1F5F9; border-radius: 4px; padding: 2px 8px; font-size: 0.78rem; color: var(--snow-dark); }
+
+.user-card { display: flex; gap: 16px; padding: 20px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; margin: 10px 0; }
+.user-avatar { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 700; flex-shrink: 0; }
+.user-info h4 { font-size: 1rem; margin-bottom: 2px; }
+.user-info .user-title { font-size: 0.88rem; color: var(--text-muted); }
+.user-info .user-meta { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+
+.code-block { background: #1E293B; color: #E2E8F0; border-radius: 8px; padding: 16px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.82rem; line-height: 1.7; overflow-x: auto; margin: 12px 0; }
+.code-block .ck { color: #7DD3FC; }
+.code-block .cs { color: #FCD34D; }
+.code-block .cv { color: #86EFAC; }
+.code-block .cm { color: #64748B; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Approval Hierarchy</h1>
+    <p>How the 4-level approval chain is invoked and routes investment requests from the creator up to Jon Beaulier (GVP) as final approver, with full organizational visibility.</p>
+</div>
+
+<div class="container">
+
+<div class="nav-bar">
+    <a href="DATA_SOURCES.html">Data Sources</a>
+    <a href="REQUEST_LIFECYCLE.html">Request Lifecycle</a>
+    <a href="APPROVAL_HIERARCHY.html" class="active">Approval Hierarchy</a>
+</div>
+
+<h2>Approval Levels</h2>
+<p class="section-intro">The approval chain consists of five levels. Level 1 is the creator/submitter. Levels 2&ndash;5 are sequential approvers, each representing a management tier. The chain culminates with the GVP as final approver.</p>
+
+<div class="hierarchy-diagram">
+    <div class="hierarchy-title">Approval Chain</div>
+
+    <div class="h-level">
+        <div class="h-level-num" style="background: #475569; color: white;">1</div>
+        <div class="h-level-card" style="background: #1E293B; color: #94A3B8; border-color: #475569;">
+            <div class="hlc-left">
+                <h4 style="color: #CBD5E1;">Account Executive (AE)</h4>
+                <div class="hlc-role">Creator / Submitter</div>
+            </div>
+            <div class="hlc-right">
+                <div class="hlc-action" style="color: #94A3B8;">Creates &amp; submits request</div>
+                <div>NEXT_APPROVER = manager</div>
+            </div>
+        </div>
+    </div>
+    <div class="h-connector"><div class="h-connector-line"><div class="vline" style="background: #3B82F6;"></div></div><div class="h-connector-label">Submit &rarr; STATUS = SUBMITTED, LEVEL = 1</div></div>
+
+    <div class="h-level">
+        <div class="h-level-num" style="background: #3B82F6; color: white;">2</div>
+        <div class="h-level-card" style="background: #1E3A5F; color: #93C5FD; border-color: #3B82F6;">
+            <div class="hlc-left">
+                <h4 style="color: #BFDBFE;">District Manager (DM)</h4>
+                <div class="hlc-role">First-level approval</div>
+            </div>
+            <div class="hlc-right">
+                <div class="hlc-action" style="color: #93C5FD;">SUBMITTED &rarr; DM_APPROVED</div>
+                <div>DM_APPROVED_BY, TITLE, AT, COMMENTS</div>
+            </div>
+        </div>
+    </div>
+    <div class="h-connector"><div class="h-connector-line"><div class="vline" style="background: #6366F1;"></div></div><div class="h-connector-label">Approve &rarr; STATUS = DM_APPROVED, LEVEL = 2</div></div>
+
+    <div class="h-level">
+        <div class="h-level-num" style="background: #6366F1; color: white;">3</div>
+        <div class="h-level-card" style="background: #1E1B4B; color: #A5B4FC; border-color: #6366F1;">
+            <div class="hlc-left">
+                <h4 style="color: #C7D2FE;">Regional Director (RD)</h4>
+                <div class="hlc-role">Second-level approval</div>
+            </div>
+            <div class="hlc-right">
+                <div class="hlc-action" style="color: #A5B4FC;">DM_APPROVED &rarr; RD_APPROVED</div>
+                <div>RD_APPROVED_BY, TITLE, AT, COMMENTS</div>
+            </div>
+        </div>
+    </div>
+    <div class="h-connector"><div class="h-connector-line"><div class="vline" style="background: #8B5CF6;"></div></div><div class="h-connector-label">Approve &rarr; STATUS = RD_APPROVED, LEVEL = 3</div></div>
+
+    <div class="h-level">
+        <div class="h-level-num" style="background: #8B5CF6; color: white;">4</div>
+        <div class="h-level-card" style="background: #2E1065; color: #C4B5FD; border-color: #8B5CF6;">
+            <div class="hlc-left">
+                <h4 style="color: #DDD6FE;">Area Vice President (AVP)</h4>
+                <div class="hlc-role">Third-level approval</div>
+            </div>
+            <div class="hlc-right">
+                <div class="hlc-action" style="color: #C4B5FD;">RD_APPROVED &rarr; AVP_APPROVED</div>
+                <div>AVP_APPROVED_BY, TITLE, AT, COMMENTS</div>
+            </div>
+        </div>
+    </div>
+    <div class="h-connector"><div class="h-connector-line"><div class="vline" style="background: #10B981;"></div></div><div class="h-connector-label">Approve &rarr; STATUS = AVP_APPROVED, LEVEL = 4</div></div>
+
+    <div class="h-level">
+        <div class="h-level-num" style="background: #10B981; color: white;">5</div>
+        <div class="h-level-card" style="background: #064E3B; color: #6EE7B7; border-color: #10B981;">
+            <div class="hlc-left">
+                <h4 style="color: #A7F3D0;">Jon Beaulier &mdash; GVP of Majors</h4>
+                <div class="hlc-role">Final Approver &nbsp;&#x2705;</div>
+            </div>
+            <div class="hlc-right">
+                <div class="hlc-action" style="color: #6EE7B7;">AVP_APPROVED &rarr; FINAL_APPROVED</div>
+                <div>GVP_APPROVED_BY, TITLE, AT, COMMENTS</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2>How the Hierarchy is Defined</h2>
+
+<h3>USERS Table</h3>
+<p class="section-intro">The approval hierarchy is configured in <code>TEMP.INVESTMENT_GOVERNANCE.USERS</code>. Each entry maps a Snowflake user to an application role and approval level.</p>
+
+<div class="user-card">
+    <div class="user-avatar" style="background: #DBEAFE; color: #1E40AF;">TL</div>
+    <div class="user-info">
+        <h4>Tracy LeGrand</h4>
+        <div class="user-title">Account Executive &nbsp;&bull;&nbsp; Username: TLEGRAND</div>
+        <div class="user-meta">
+            <span class="badge" style="background:#F1F5F9; color:#475569;">Role: AE</span>
+            <span class="badge" style="background:#DBEAFE; color:#1E40AF;">Level 1</span>
+            <span class="badge" style="background:#F1F5F9; color:#475569;">Theater: US Majors</span>
+            <span class="badge" style="background:#FEF3C7; color:#92400E;">Manager: DM Manager</span>
+        </div>
+    </div>
+</div>
+
+<div class="user-card">
+    <div class="user-avatar" style="background: #D1FAE5; color: #065F46;">JB</div>
+    <div class="user-info">
+        <h4>Jon Beaulier</h4>
+        <div class="user-title">GVP of Majors &nbsp;&bull;&nbsp; Username: JON_BEAULIER</div>
+        <div class="user-meta">
+            <span class="badge" style="background:#D1FAE5; color:#065F46;">Role: GVP</span>
+            <span class="badge" style="background:#10B981; color:white;">Level 5</span>
+            <span class="badge" style="background:#F1F5F9; color:#475569;">Theater: US Majors</span>
+            <span class="badge" style="background:#10B981; color:white;">&#x2705; Final Approver</span>
+        </div>
+    </div>
+</div>
+
+<h3>VW_CURRENT_USER_INFO View</h3>
+<p class="section-intro">Identifies the currently logged-in user by joining Workday HR data with the USERS table.</p>
+
+<div class="card">
+    <div style="display:grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 12px; align-items: center; text-align: center;">
+        <div style="background: #EDE9FE; border-radius: 10px; padding: 14px;">
+            <div style="font-weight: 700; font-size: 0.9rem; color: #5B21B6;">Workday View</div>
+            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">HR.WORKDAY_BASIC<br>Name, Title, Manager<br>Cost Center</div>
+        </div>
+        <div style="font-size: 1.4rem; color: var(--snow-blue);">&#x2B95;</div>
+        <div style="background: #DBEAFE; border-radius: 10px; padding: 14px;">
+            <div style="font-weight: 700; font-size: 0.9rem; color: #1E40AF;">LEFT JOIN</div>
+            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">Match on derived<br>Snowflake username<br>WHERE = CURRENT_USER()</div>
+        </div>
+        <div style="font-size: 1.4rem; color: var(--snow-blue);">&#x2B95;</div>
+        <div style="background: #D1FAE5; border-radius: 10px; padding: 14px;">
+            <div style="font-weight: 700; font-size: 0.9rem; color: #065F46;">USERS Table</div>
+            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">Role, Approval Level<br>Final Approver flag<br>Manager reference</div>
+        </div>
+    </div>
+    <div class="code-block" style="margin-top: 16px;">
+        <span class="cm">-- Username derivation from Workday</span><br>
+        <span class="ck">UPPER</span>(<span class="ck">CONCAT</span>(<span class="ck">LEFT</span>(first_name, <span class="cv">1</span>), <span class="ck">REPLACE</span>(last_name, <span class="cs">' '</span>, <span class="cs">''</span>)))<br>
+        <span class="cm">-- Example: Tracy LeGrand &rarr; TLEGRAND</span>
+    </div>
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;"><strong>Fallback:</strong> If user exists in Workday but not in USERS table, defaults to ROLE='USER', APPROVAL_LEVEL=0, IS_FINAL_APPROVER=false, THEATER=COST_CENTER_NAME.</p>
+</div>
+
+<h2>How Approval Routing Works</h2>
+
+<div class="routing-diagram">
+    <div class="route-step">
+        <div class="route-num">1</div>
+        <div class="route-content">
+            <h4>Initial Routing on Submission</h4>
+            <p>When submitted, the system looks up the <strong>creator's</strong> manager from <code>cached_users</code> and sets <code>NEXT_APPROVER_NAME</code> to that manager. Sets CURRENT_APPROVAL_LEVEL = 1, STATUS = SUBMITTED.</p>
+            <div class="code-block" style="margin-top:10px;">
+                <span class="cm">-- api_server.py: submit endpoint</span><br>
+                cur2.execute(<span class="cs">"SELECT manager_name FROM cached_users WHERE snowflake_username = ?"</span>, (created_by,))<br>
+                next_approver = mrow[<span class="cs">"manager_name"</span>] <span class="ck">if</span> mrow <span class="ck">else</span> <span class="cv">None</span>
+            </div>
+        </div>
+    </div>
+    <div class="route-step">
+        <div class="route-num">2</div>
+        <div class="route-content">
+            <h4>Status Transitions Map</h4>
+            <p>Each approval is driven by the <code>status_transitions</code> dictionary which maps the current status to the next status, the approval fields to populate, and the new level.</p>
+            <div class="code-block" style="margin-top:10px;">
+                status_transitions = {<br>
+                &nbsp;&nbsp;<span class="cs">'SUBMITTED'</span>: &nbsp;&nbsp;&nbsp;(<span class="cs">'DM_APPROVED'</span>, &nbsp;&nbsp;&nbsp;<span class="cs">'dm_approved_by'</span>, &nbsp;<span class="cs">'dm_approved_by_title'</span>, &nbsp;<span class="cs">'dm_approved_at'</span>, &nbsp;<span class="cs">'dm_comments'</span>, &nbsp;<span class="cv">2</span>),<br>
+                &nbsp;&nbsp;<span class="cs">'DM_APPROVED'</span>: &nbsp;(<span class="cs">'RD_APPROVED'</span>, &nbsp;&nbsp;&nbsp;<span class="cs">'rd_approved_by'</span>, &nbsp;<span class="cs">'rd_approved_by_title'</span>, &nbsp;<span class="cs">'rd_approved_at'</span>, &nbsp;<span class="cs">'rd_comments'</span>, &nbsp;<span class="cv">3</span>),<br>
+                &nbsp;&nbsp;<span class="cs">'RD_APPROVED'</span>: &nbsp;(<span class="cs">'AVP_APPROVED'</span>, &nbsp;&nbsp;<span class="cs">'avp_approved_by'</span>, <span class="cs">'avp_approved_by_title'</span>, <span class="cs">'avp_approved_at'</span>, <span class="cs">'avp_comments'</span>, <span class="cv">4</span>),<br>
+                &nbsp;&nbsp;<span class="cs">'AVP_APPROVED'</span>: (<span class="cs">'FINAL_APPROVED'</span>, <span class="cs">'gvp_approved_by'</span>, <span class="cs">'gvp_approved_by_title'</span>, <span class="cs">'gvp_approved_at'</span>, <span class="cs">'gvp_comments'</span>, <span class="cv">5</span>)<br>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="route-step">
+        <div class="route-num">3</div>
+        <div class="route-content">
+            <h4>Per-Approval Processing</h4>
+            <p>For each approval action:</p>
+            <ol style="font-size:0.88rem; color:var(--text-muted); padding-left:20px; margin-top:6px;">
+                <li>Read current status to determine the transition</li>
+                <li>Record the approver's <strong>name</strong> and <strong>title</strong> (from VW_CURRENT_USER_INFO via cached session)</li>
+                <li>Store the approval <strong>timestamp</strong> and optional <strong>comments</strong></li>
+                <li>Advance CURRENT_APPROVAL_LEVEL to the next level</li>
+                <li>Transition STATUS to the next state</li>
+            </ol>
+        </div>
+    </div>
+    <div class="route-step">
+        <div class="route-num" style="background: var(--green);">&#x2713;</div>
+        <div class="route-content" style="border-color: var(--green);">
+            <h4>Final Approval by Jon Beaulier</h4>
+            <p>When Jon Beaulier (APPROVAL_LEVEL=5, IS_FINAL_APPROVER=true, ROLE=GVP) approves a request in AVP_APPROVED status:</p>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                <span class="badge" style="background:#D1FAE5; color:#065F46;">STATUS = FINAL_APPROVED</span>
+                <span class="badge" style="background:#D1FAE5; color:#065F46;">GVP_APPROVED_BY = "Jon Beaulier"</span>
+                <span class="badge" style="background:#D1FAE5; color:#065F46;">LEVEL = 5</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2>Approver Actions at Each Level</h2>
+<p class="section-intro">Every approver (Levels 2&ndash;5) has four possible actions on a request that has reached their level.</p>
+
+<div class="action-grid">
+    <div class="action-card" style="border-color: var(--green);">
+        <h4 style="color: var(--green);">&#x2705; Approve</h4>
+        <p>Advances the request one level in the chain. Records approver's name, title, timestamp, and comments in level-specific fields.</p>
+        <div class="a-result"><strong>Result:</strong> Next status in chain (or FINAL_APPROVED at Level 5)</div>
+    </div>
+    <div class="action-card" style="border-color: var(--amber);">
+        <h4 style="color: var(--amber);">&#x21B0; Send Back</h4>
+        <p>Returns request to DRAFT for revision. Comments stored in GVP_COMMENTS. <strong>Previous approval fields are preserved</strong> (not cleared).</p>
+        <div class="a-result"><strong>Result:</strong> DRAFT</div>
+    </div>
+    <div class="action-card" style="border-color: var(--orange);">
+        <h4 style="color: var(--orange);">&#x2716; Reject</h4>
+        <p>Sets status to REJECTED. Creator can revise the business case and resubmit or save as draft.</p>
+        <div class="a-result"><strong>Result:</strong> REJECTED (revisable)</div>
+    </div>
+    <div class="action-card" style="border-color: var(--red);">
+        <h4 style="color: var(--red);">&#x26D4; Deny</h4>
+        <p>Sets status to DENIED with comments in GVP_COMMENTS. No further action path. Terminal state.</p>
+        <div class="a-result"><strong>Result:</strong> DENIED (terminal)</div>
+    </div>
+</div>
+
+<h2>Viewer Access Model</h2>
+<p class="section-intro">The application does not implement row-level security at the API layer. All authenticated users can view all investment requests, providing full organizational transparency.</p>
+
+<div class="viewer-grid">
+    <div class="viewer-card">
+        <div class="scope">All Users</div>
+        <h4>Dashboard</h4>
+        <p>Summary cards: Draft, Pending Approval, Rejected, Approved counts and total investment amounts.</p>
+    </div>
+    <div class="viewer-card">
+        <div class="scope">All Users</div>
+        <h4>Investment Requests Tab</h4>
+        <p>Full list of all requests with filtering by theater, industry, quarter, status, and fiscal year.</p>
+    </div>
+    <div class="viewer-card">
+        <div class="scope">All Users</div>
+        <h4>Request Detail</h4>
+        <p>Complete details including business case, approval log, and all approval chain data.</p>
+    </div>
+    <div class="viewer-card">
+        <div class="scope">All Users</div>
+        <h4>Approvals Tab</h4>
+        <p>Requests filterable by theater, showing requests pending approval at all levels.</p>
+    </div>
+    <div class="viewer-card" style="border-left: 3px solid var(--snow-blue);">
+        <div class="scope" style="color: var(--snow-dark);">Scoped to Creator</div>
+        <h4>"My Requests" Filter</h4>
+        <p>Filters to show only requests where CREATED_BY matches the current user.</p>
+    </div>
+    <div class="viewer-card" style="border-left: 3px solid var(--green);">
+        <div class="scope" style="color: var(--green);">Scoped to Approver</div>
+        <h4>"Pending My Approval" Filter</h4>
+        <p>Filters where NEXT_APPROVER_NAME matches the current user's display name.</p>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Pending My Approval Logic</h3>
+    <div class="code-block">
+        <span class="ck">SELECT COUNT</span>(*) <span class="ck">FROM</span> cached_investment_requests<br>
+        <span class="ck">WHERE</span> next_approver_name = <span class="cs">?</span> &nbsp;<span class="cm">-- current user's display_name</span>
+    </div>
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">A user sees requests pending their action when their display name matches the NEXT_APPROVER_NAME field. The Dashboard's Approval Pipeline shows all in-flight requests to all users.</p>
+</div>
+
+<h2>End-to-End Example</h2>
+<p class="section-intro">Tracy LeGrand creates an investment request for $50,000 and it flows through the full approval chain.</p>
+
+<div class="example-timeline">
+    <div class="et-step">
+        <div class="et-dot" style="background: #F8FAFC; color: #475569; border-color: #94A3B8;">1</div>
+        <div class="et-content">
+            <h4>Tracy LeGrand <span style="color:var(--text-muted); font-weight:400;">(AE, Level 1)</span> creates and submits</h4>
+            <div class="et-detail">Request created for $50,000 investment</div>
+            <div class="et-fields">
+                <span class="et-field">STATUS = SUBMITTED</span>
+                <span class="et-field">LEVEL = 1</span>
+                <span class="et-field">NEXT_APPROVER = "DM Manager"</span>
+            </div>
+        </div>
+    </div>
+    <div class="et-step">
+        <div class="et-dot" style="background: #EFF6FF; color: #1E40AF; border-color: #3B82F6;">2</div>
+        <div class="et-content">
+            <h4>DM Manager <span style="color:var(--text-muted); font-weight:400;">(DM, Level 2)</span> approves</h4>
+            <div class="et-detail" style="font-style:italic;">"Good investment case"</div>
+            <div class="et-fields">
+                <span class="et-field">STATUS = DM_APPROVED</span>
+                <span class="et-field">LEVEL = 2</span>
+                <span class="et-field">DM_APPROVED_BY = "DM Manager"</span>
+            </div>
+        </div>
+    </div>
+    <div class="et-step">
+        <div class="et-dot" style="background: #F5F3FF; color: #6366F1; border-color: #6366F1;">3</div>
+        <div class="et-content">
+            <h4>Regional Director <span style="color:var(--text-muted); font-weight:400;">(RD, Level 3)</span> approves</h4>
+            <div class="et-fields">
+                <span class="et-field">STATUS = RD_APPROVED</span>
+                <span class="et-field">LEVEL = 3</span>
+                <span class="et-field">RD_APPROVED_BY = (approver)</span>
+            </div>
+        </div>
+    </div>
+    <div class="et-step">
+        <div class="et-dot" style="background: #F5F3FF; color: #8B5CF6; border-color: #8B5CF6;">4</div>
+        <div class="et-content">
+            <h4>Area VP <span style="color:var(--text-muted); font-weight:400;">(AVP, Level 4)</span> approves</h4>
+            <div class="et-fields">
+                <span class="et-field">STATUS = AVP_APPROVED</span>
+                <span class="et-field">LEVEL = 4</span>
+                <span class="et-field">AVP_APPROVED_BY = (approver)</span>
+            </div>
+        </div>
+    </div>
+    <div class="et-step">
+        <div class="et-dot" style="background: #ECFDF5; color: #065F46; border-color: #10B981;">&#x2713;</div>
+        <div class="et-content" style="border-color: var(--green); background: #F0FDF4;">
+            <h4>Jon Beaulier <span style="color:var(--text-muted); font-weight:400;">(GVP, Level 5, Final Approver)</span> approves</h4>
+            <div class="et-detail" style="font-style:italic;">"Approved for Q2"</div>
+            <div class="et-fields">
+                <span class="et-field" style="background: #D1FAE5; color: #065F46;">STATUS = FINAL_APPROVED</span>
+                <span class="et-field" style="background: #D1FAE5; color: #065F46;">LEVEL = 5</span>
+                <span class="et-field">GVP_APPROVED_BY = "Jon Beaulier"</span>
+                <span class="et-field">GVP_APPROVED_BY_TITLE = "GVP of Majors"</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2>Hierarchy Management</h2>
+
+<div class="card">
+    <h3>Adding New Users</h3>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:12px;">To add a new user to the approval chain, insert a row into USERS with:</p>
+    <table>
+        <tr><th>Field</th><th>Requirement</th></tr>
+        <tr><td><code>SNOWFLAKE_USERNAME</code></td><td>Must match Snowflake login (uppercase, first initial + last name)</td></tr>
+        <tr><td><code>ROLE</code></td><td>DM, RD, AVP, or GVP</td></tr>
+        <tr><td><code>APPROVAL_LEVEL</code></td><td>2, 3, 4, or 5</td></tr>
+        <tr><td><code>MANAGER_NAME</code></td><td>Direct manager's display name</td></tr>
+        <tr><td><code>IS_FINAL_APPROVER</code></td><td><code>true</code> only for the GVP</td></tr>
+    </table>
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:12px;">The user's Workday data (title, manager, employee ID) is automatically resolved via <code>VW_CURRENT_USER_INFO</code> when they log in.</p>
+</div>
+
+<div class="card" style="border-left: 3px solid var(--amber);">
+    <h3>Current Hierarchy Gaps</h3>
+    <p style="font-size:0.9rem; color:var(--text-muted);">The USERS table currently has only 2 entries (Level 1 AE and Level 5 GVP). Users at intermediate levels (DM, RD, AVP) are not yet configured. The approval chain still functions &mdash; any authenticated user can approve at any level &mdash; but NEXT_APPROVER_NAME routing and level enforcement depend on the USERS table configuration.</p>
+</div>
+
+</div>
+</body>
+</html>

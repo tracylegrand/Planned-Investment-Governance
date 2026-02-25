@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investment Governance - Request Lifecycle</title>
+<style>
+:root {
+    --snow-blue: #29B5E8;
+    --snow-dark: #11567F;
+    --snow-navy: #0D2B45;
+    --snow-light: #E8F7FC;
+    --bg: #F6F8FA;
+    --card-bg: #FFFFFF;
+    --text: #1E293B;
+    --text-muted: #64748B;
+    --border: #E2E8F0;
+    --green: #10B981;
+    --amber: #F59E0B;
+    --red: #EF4444;
+    --purple: #8B5CF6;
+    --orange: #F97316;
+    --pink: #EC4899;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.header { background: linear-gradient(135deg, var(--snow-navy) 0%, var(--snow-dark) 100%); color: white; padding: 48px 0; text-align: center; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 8px; }
+.header p { font-size: 1.1rem; opacity: 0.85; max-width: 700px; margin: 0 auto; }
+.container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+.nav-bar { display: flex; gap: 12px; margin-bottom: 32px; flex-wrap: wrap; }
+.nav-bar a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: var(--snow-dark); font-weight: 500; font-size: 0.9rem; transition: all 0.2s; }
+.nav-bar a:hover { border-color: var(--snow-blue); background: var(--snow-light); }
+.nav-bar a.active { background: var(--snow-blue); color: white; border-color: var(--snow-blue); }
+h2 { font-size: 1.5rem; font-weight: 700; color: var(--snow-navy); margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--snow-blue); }
+h3 { font-size: 1.15rem; font-weight: 600; color: var(--snow-dark); margin: 24px 0 12px; }
+.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+.badge-draft { background: #F1F5F9; color: #475569; }
+.badge-submitted { background: #DBEAFE; color: #1E40AF; }
+.badge-dm { background: #E0E7FF; color: #3730A3; }
+.badge-rd { background: #EDE9FE; color: #5B21B6; }
+.badge-avp { background: #FCE7F3; color: #9D174D; }
+.badge-approved { background: #D1FAE5; color: #065F46; }
+.badge-rejected { background: #FEF3C7; color: #92400E; }
+.badge-denied { background: #FEE2E2; color: #991B1B; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+th { background: var(--snow-navy); color: white; padding: 10px 14px; text-align: left; font-weight: 600; }
+th:first-child { border-radius: 8px 0 0 0; }
+th:last-child { border-radius: 0 8px 0 0; }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--snow-light); }
+code { background: #F1F5F9; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; color: var(--snow-dark); font-family: 'SF Mono', 'Fira Code', monospace; }
+.section-intro { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 20px; line-height: 1.7; }
+
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 20px 0; }
+.status-card { border-radius: 10px; padding: 16px; border-left: 4px solid; }
+.status-card h4 { font-size: 0.95rem; margin-bottom: 4px; }
+.status-card p { font-size: 0.82rem; color: var(--text-muted); }
+
+.lifecycle-diagram { background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 16px; padding: 40px 32px; margin: 24px 0; overflow-x: auto; }
+.lc-title { color: white; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 20px; text-align: center; opacity: 0.6; }
+
+.pipeline { display: flex; align-items: center; justify-content: center; gap: 0; margin: 16px 0; flex-wrap: nowrap; }
+.pipe-node { border-radius: 12px; padding: 14px 16px; text-align: center; min-width: 120px; position: relative; border: 2px solid; }
+.pipe-node .pn-label { font-weight: 700; font-size: 0.82rem; }
+.pipe-node .pn-detail { font-size: 0.7rem; opacity: 0.7; margin-top: 2px; }
+.pipe-arrow { font-size: 1.4rem; padding: 0 4px; flex-shrink: 0; }
+
+.alt-paths { display: flex; gap: 16px; margin-top: 20px; justify-content: center; flex-wrap: wrap; }
+.alt-path { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 14px 18px; min-width: 140px; text-align: center; }
+.alt-path .ap-label { font-weight: 600; font-size: 0.85rem; }
+.alt-path .ap-detail { font-size: 0.72rem; opacity: 0.6; margin-top: 4px; }
+
+.phase-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; border-left: 4px solid; }
+.phase-card .phase-num { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.phase-card h3 { margin: 0 0 12px; }
+.phase-card .trigger { background: #F8FAFC; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 10px 0; font-size: 0.88rem; }
+.phase-card .trigger strong { color: var(--snow-dark); }
+.step-list { list-style: none; padding: 0; counter-reset: step; }
+.step-list li { padding: 8px 0 8px 36px; position: relative; font-size: 0.9rem; border-left: 2px solid var(--border); margin-left: 12px; }
+.step-list li:last-child { border-left-color: transparent; }
+.step-list li::before { counter-increment: step; content: counter(step); position: absolute; left: -13px; top: 6px; width: 24px; height: 24px; border-radius: 50%; background: var(--snow-blue); color: white; font-size: 0.75rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin: 10px 0; }
+.field-item { background: #F8FAFC; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 0.82rem; }
+.field-item strong { color: var(--snow-dark); }
+
+.transition-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; flex-wrap: wrap; }
+.transition-row .from-badge, .transition-row .to-badge { padding: 4px 12px; border-radius: 6px; font-size: 0.82rem; font-weight: 600; }
+.transition-arrow { color: var(--snow-blue); font-weight: 700; }
+.transition-fields { font-size: 0.8rem; color: var(--text-muted); }
+
+.action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 16px 0; }
+.action-card { border-radius: 10px; padding: 16px; border: 1px solid var(--border); }
+.action-card h4 { font-size: 0.95rem; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.action-card p { font-size: 0.82rem; color: var(--text-muted); }
+.action-card .endpoint { font-size: 0.78rem; color: var(--snow-dark); font-family: 'SF Mono', monospace; margin-top: 8px; background: #F8FAFC; padding: 4px 8px; border-radius: 4px; }
+
+.log-preview { background: #FAFAFA; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.log-row { display: flex; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); gap: 12px; font-size: 0.85rem; }
+.log-row:last-child { border-bottom: none; }
+.log-row .lr-badge { width: 100px; flex-shrink: 0; }
+.log-row .lr-user { font-weight: 600; min-width: 120px; }
+.log-row .lr-title { color: var(--text-muted); min-width: 140px; }
+.log-row .lr-comment { color: var(--text-muted); font-style: italic; flex: 1; }
+.log-row .lr-date { color: var(--text-muted); font-size: 0.8rem; text-align: right; min-width: 130px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Request Lifecycle</h1>
+    <p>The creation, drafting, editing, review, and approval flow of an investment request from inception to final disposition.</p>
+</div>
+
+<div class="container">
+
+<div class="nav-bar">
+    <a href="DATA_SOURCES.html">Data Sources</a>
+    <a href="REQUEST_LIFECYCLE.html" class="active">Request Lifecycle</a>
+    <a href="APPROVAL_HIERARCHY.html">Approval Hierarchy</a>
+</div>
+
+<h2>Status States</h2>
+<p class="section-intro">Each investment request exists in one of eight statuses. The status determines which actions are available and who can act on the request.</p>
+
+<div class="status-grid">
+    <div class="status-card" style="background: #F8FAFC; border-color: #94A3B8;">
+        <h4><span class="badge badge-draft">DRAFT</span></h4>
+        <p>Request is being composed or has been returned for revision. Fully editable by creator.</p>
+    </div>
+    <div class="status-card" style="background: #EFF6FF; border-color: #3B82F6;">
+        <h4><span class="badge badge-submitted">SUBMITTED</span></h4>
+        <p>Submitted for approval. Awaiting District Manager (DM) review.</p>
+    </div>
+    <div class="status-card" style="background: #EEF2FF; border-color: #6366F1;">
+        <h4><span class="badge badge-dm">DM_APPROVED</span></h4>
+        <p>District Manager approved. Awaiting Regional Director (RD) review.</p>
+    </div>
+    <div class="status-card" style="background: #F5F3FF; border-color: #8B5CF6;">
+        <h4><span class="badge badge-rd">RD_APPROVED</span></h4>
+        <p>Regional Director approved. Awaiting Area VP (AVP) review.</p>
+    </div>
+    <div class="status-card" style="background: #FDF2F8; border-color: #EC4899;">
+        <h4><span class="badge badge-avp">AVP_APPROVED</span></h4>
+        <p>Area VP approved. Awaiting GVP / final approval.</p>
+    </div>
+    <div class="status-card" style="background: #ECFDF5; border-color: #10B981;">
+        <h4><span class="badge badge-approved">FINAL_APPROVED</span></h4>
+        <p>Fully approved through the entire chain. Terminal success state.</p>
+    </div>
+    <div class="status-card" style="background: #FFFBEB; border-color: #F59E0B;">
+        <h4><span class="badge badge-rejected">REJECTED</span></h4>
+        <p>Rejected by an approver. Can be revised and resubmitted by creator.</p>
+    </div>
+    <div class="status-card" style="background: #FEF2F2; border-color: #EF4444;">
+        <h4><span class="badge badge-denied">DENIED</span></h4>
+        <p>Denied by an approver with comments. Terminal state.</p>
+    </div>
+</div>
+
+<h2>Lifecycle Flow</h2>
+
+<div class="lifecycle-diagram">
+    <div class="lc-title">Happy Path &mdash; Approval Pipeline</div>
+    <div class="pipeline">
+        <div class="pipe-node" style="background: #1E293B; color: #94A3B8; border-color: #475569;">
+            <div class="pn-label">DRAFT</div>
+            <div class="pn-detail">Level 0</div>
+        </div>
+        <div class="pipe-arrow" style="color: #3B82F6;">&#x27A1;</div>
+        <div class="pipe-node" style="background: #1E3A5F; color: #93C5FD; border-color: #3B82F6;">
+            <div class="pn-label">SUBMITTED</div>
+            <div class="pn-detail">Level 1</div>
+        </div>
+        <div class="pipe-arrow" style="color: #6366F1;">&#x27A1;</div>
+        <div class="pipe-node" style="background: #1E1B4B; color: #A5B4FC; border-color: #6366F1;">
+            <div class="pn-label">DM_APPROVED</div>
+            <div class="pn-detail">Level 2</div>
+        </div>
+        <div class="pipe-arrow" style="color: #8B5CF6;">&#x27A1;</div>
+        <div class="pipe-node" style="background: #2E1065; color: #C4B5FD; border-color: #8B5CF6;">
+            <div class="pn-label">RD_APPROVED</div>
+            <div class="pn-detail">Level 3</div>
+        </div>
+        <div class="pipe-arrow" style="color: #EC4899;">&#x27A1;</div>
+        <div class="pipe-node" style="background: #4A1942; color: #F9A8D4; border-color: #EC4899;">
+            <div class="pn-label">AVP_APPROVED</div>
+            <div class="pn-detail">Level 4</div>
+        </div>
+        <div class="pipe-arrow" style="color: #10B981;">&#x27A1;</div>
+        <div class="pipe-node" style="background: #064E3B; color: #6EE7B7; border-color: #10B981;">
+            <div class="pn-label">FINAL_APPROVED</div>
+            <div class="pn-detail">Level 5</div>
+        </div>
+    </div>
+
+    <div class="lc-title" style="margin-top: 28px;">Alternative Outcomes (available at any approval level)</div>
+    <div class="alt-paths">
+        <div class="alt-path" style="border-color: #475569;">
+            <div class="ap-label" style="color: #94A3B8;">&#x21A9; Withdraw</div>
+            <div class="ap-detail" style="color: #94A3B8;">Returns to DRAFT<br>Clears all approvals</div>
+        </div>
+        <div class="alt-path" style="border-color: #F59E0B;">
+            <div class="ap-label" style="color: #FCD34D;">&#x21B0; Send Back</div>
+            <div class="ap-detail" style="color: #FCD34D;">Returns to DRAFT<br>Preserves approvals</div>
+        </div>
+        <div class="alt-path" style="border-color: #F97316;">
+            <div class="ap-label" style="color: #FDBA74;">&#x2716; Reject</div>
+            <div class="ap-detail" style="color: #FDBA74;">REJECTED status<br>Can be revised</div>
+        </div>
+        <div class="alt-path" style="border-color: #EF4444;">
+            <div class="ap-label" style="color: #FCA5A5;">&#x26D4; Deny</div>
+            <div class="ap-detail" style="color: #FCA5A5;">DENIED status<br>Terminal</div>
+        </div>
+    </div>
+</div>
+
+<h2>Phase 1: Creation</h2>
+
+<div class="phase-card" style="border-color: var(--snow-blue);">
+    <div class="phase-num" style="color: var(--snow-blue);">Phase 1</div>
+    <h3>Creating a New Request</h3>
+    <div class="trigger"><strong>Trigger:</strong> User clicks "New Request" in the Investment Requests tab &nbsp;&bull;&nbsp; <strong>API:</strong> <code>POST /api/requests</code></div>
+
+    <h4 style="margin-top:16px; font-size:0.9rem; color:var(--snow-dark);">User-Provided Fields</h4>
+    <div class="field-grid">
+        <div class="field-item"><strong>Title</strong> (required)</div>
+        <div class="field-item"><strong>Account</strong> (SFDC search or free-form)</div>
+        <div class="field-item"><strong>Investment Type</strong> (6 options)</div>
+        <div class="field-item"><strong>Amount Requested</strong> ($)</div>
+        <div class="field-item"><strong>Quarter</strong> (fiscal quarter)</div>
+        <div class="field-item"><strong>Theater</strong> (from SFDC or account)</div>
+        <div class="field-item"><strong>Industry Segment</strong> (filtered by theater)</div>
+        <div class="field-item"><strong>Business Justification</strong> (rich text)</div>
+        <div class="field-item"><strong>Expected Outcome</strong> (rich text)</div>
+        <div class="field-item"><strong>Risk Assessment</strong> (rich text)</div>
+    </div>
+
+    <h4 style="margin-top:16px; font-size:0.9rem; color:var(--snow-dark);">System Auto-Populated</h4>
+    <div class="field-grid">
+        <div class="field-item"><strong>CREATED_BY</strong> = Snowflake username</div>
+        <div class="field-item"><strong>CREATED_BY_NAME</strong> = Workday display name</div>
+        <div class="field-item"><strong>STATUS</strong> = DRAFT</div>
+        <div class="field-item"><strong>NEXT_APPROVER</strong> = creator's manager</div>
+    </div>
+
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:12px;"><strong>Cache behavior:</strong> A temporary negative ID is assigned in SQLite. Background thread creates the Snowflake record (real autoincrement ID) and refreshes cache.</p>
+</div>
+
+<h2>Phase 2: Drafting &amp; Editing</h2>
+
+<div class="phase-card" style="border-color: #94A3B8;">
+    <div class="phase-num" style="color: #64748B;">Phase 2</div>
+    <h3>Editing a Draft</h3>
+    <div class="trigger"><strong>Precondition:</strong> Request must be in <span class="badge badge-draft">DRAFT</span> status &nbsp;&bull;&nbsp; <strong>API:</strong> <code>PUT /api/requests/&lt;id&gt;</code></div>
+
+    <ol class="step-list">
+        <li>User opens a DRAFT request and clicks Edit</li>
+        <li>All fields are editable: Title, Account, Investment Type, Amount, Quarter, Theater, Industry Segment, Business Justification, Expected Outcome, Risk Assessment</li>
+        <li>Optional draft comment captured with commenter name and timestamp</li>
+        <li>User clicks <strong>Save as Draft</strong> (stays DRAFT) or <strong>Submit for Approval</strong> (transitions to SUBMITTED)</li>
+    </ol>
+
+    <div class="trigger" style="margin-top: 16px; border-left: 3px solid var(--red);">
+        <strong>Deleting a Draft:</strong> <code>DELETE /api/requests/&lt;id&gt;</code> &mdash; Removes the request and all associated records (opportunities, contributors, suggested changes) from both cache and Snowflake. Only available for DRAFT status.
+    </div>
+</div>
+
+<h2>Phase 3: Submission</h2>
+
+<div class="phase-card" style="border-color: #3B82F6;">
+    <div class="phase-num" style="color: #3B82F6;">Phase 3</div>
+    <h3>Submitting for Approval</h3>
+    <div class="trigger"><strong>Precondition:</strong> <span class="badge badge-draft">DRAFT</span> &nbsp;&bull;&nbsp; <strong>API:</strong> <code>POST /api/requests/&lt;id&gt;/submit</code></div>
+
+    <ol class="step-list">
+        <li>System looks up the <strong>creator's</strong> manager from the <code>cached_users</code> table</li>
+        <li>Sets <code>NEXT_APPROVER_NAME</code> to the creator's manager</li>
+        <li>Updates: STATUS = SUBMITTED, CURRENT_APPROVAL_LEVEL = 1</li>
+        <li>Captures optional submission comment with submitter name and timestamp</li>
+        <li>Request enters the approval pipeline</li>
+    </ol>
+</div>
+
+<h2>Phase 4: Approval Chain</h2>
+
+<div class="phase-card" style="border-color: var(--green);">
+    <div class="phase-num" style="color: var(--green);">Phase 4</div>
+    <h3>Approval Progression</h3>
+    <div class="trigger"><strong>API:</strong> <code>POST /api/requests/&lt;id&gt;/approve</code></div>
+
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:16px;">Each approval advances the request one level. The status_transitions map drives the entire flow:</p>
+
+    <div class="transition-row">
+        <span class="from-badge" style="background: #DBEAFE; color: #1E40AF;">SUBMITTED</span>
+        <span class="transition-arrow">&#x27A1;</span>
+        <span class="to-badge" style="background: #E0E7FF; color: #3730A3;">DM_APPROVED</span>
+        <span class="transition-fields">&nbsp; Level 1 &rarr; 2 &nbsp;&bull;&nbsp; Sets DM_APPROVED_BY, TITLE, AT, COMMENTS</span>
+    </div>
+    <div class="transition-row">
+        <span class="from-badge" style="background: #E0E7FF; color: #3730A3;">DM_APPROVED</span>
+        <span class="transition-arrow">&#x27A1;</span>
+        <span class="to-badge" style="background: #EDE9FE; color: #5B21B6;">RD_APPROVED</span>
+        <span class="transition-fields">&nbsp; Level 2 &rarr; 3 &nbsp;&bull;&nbsp; Sets RD_APPROVED_BY, TITLE, AT, COMMENTS</span>
+    </div>
+    <div class="transition-row">
+        <span class="from-badge" style="background: #EDE9FE; color: #5B21B6;">RD_APPROVED</span>
+        <span class="transition-arrow">&#x27A1;</span>
+        <span class="to-badge" style="background: #FCE7F3; color: #9D174D;">AVP_APPROVED</span>
+        <span class="transition-fields">&nbsp; Level 3 &rarr; 4 &nbsp;&bull;&nbsp; Sets AVP_APPROVED_BY, TITLE, AT, COMMENTS</span>
+    </div>
+    <div class="transition-row">
+        <span class="from-badge" style="background: #FCE7F3; color: #9D174D;">AVP_APPROVED</span>
+        <span class="transition-arrow">&#x27A1;</span>
+        <span class="to-badge" style="background: #D1FAE5; color: #065F46;">FINAL_APPROVED</span>
+        <span class="transition-fields">&nbsp; Level 4 &rarr; 5 &nbsp;&bull;&nbsp; Sets GVP_APPROVED_BY, TITLE, AT, COMMENTS</span>
+    </div>
+
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:16px;">Each approval records the approver's <strong>name</strong>, <strong>title</strong>, <strong>timestamp</strong>, and optional <strong>comments</strong> in the level-specific fields.</p>
+</div>
+
+<h2>Phase 5: Alternative Outcomes</h2>
+
+<div class="action-grid">
+    <div class="action-card" style="border-left: 3px solid #94A3B8;">
+        <h4>&#x21A9; Withdraw</h4>
+        <p>Creator pulls back the request. Status returns to <span class="badge badge-draft">DRAFT</span>. <strong>All approval fields are cleared</strong> (set to NULL). CURRENT_APPROVAL_LEVEL resets to 0. Withdrawal metadata (who, when, comment) is recorded.</p>
+        <div class="endpoint">POST /api/requests/&lt;id&gt;/withdraw</div>
+        <p style="margin-top:6px; font-size:0.78rem;"><strong>Available:</strong> SUBMITTED, DM_APPROVED, RD_APPROVED, AVP_APPROVED</p>
+    </div>
+    <div class="action-card" style="border-left: 3px solid #F59E0B;">
+        <h4>&#x21B0; Send Back</h4>
+        <p>Approver returns request for revision. Status returns to <span class="badge badge-draft">DRAFT</span>. <strong>Previous approval fields are preserved</strong> (not cleared). Comments stored in GVP_COMMENTS.</p>
+        <div class="endpoint">POST /api/requests/&lt;id&gt;/send-back</div>
+        <p style="margin-top:6px; font-size:0.78rem;"><strong>Available:</strong> SUBMITTED, DM_APPROVED, RD_APPROVED, AVP_APPROVED</p>
+    </div>
+    <div class="action-card" style="border-left: 3px solid #F97316;">
+        <h4>&#x2716; Reject</h4>
+        <p>Approver rejects the request. Status set to <span class="badge badge-rejected">REJECTED</span>. Creator can <strong>revise</strong> the business case and resubmit or save as draft.</p>
+        <div class="endpoint">POST /api/requests/&lt;id&gt;/reject</div>
+        <p style="margin-top:6px; font-size:0.78rem;"><strong>Available:</strong> SUBMITTED, DM_APPROVED, RD_APPROVED, AVP_APPROVED</p>
+    </div>
+    <div class="action-card" style="border-left: 3px solid #EF4444;">
+        <h4>&#x26D4; Deny</h4>
+        <p>Approver denies the request with comments. Status set to <span class="badge badge-denied">DENIED</span>. <strong>Terminal state</strong> &mdash; no further actions available.</p>
+        <div class="endpoint">POST /api/requests/&lt;id&gt;/deny</div>
+        <p style="margin-top:6px; font-size:0.78rem;"><strong>Available:</strong> SUBMITTED, DM_APPROVED, RD_APPROVED, AVP_APPROVED</p>
+    </div>
+</div>
+
+<div class="phase-card" style="border-color: #F97316;">
+    <div class="phase-num" style="color: #F97316;">Revision</div>
+    <h3>Revising a Rejected Request</h3>
+    <div class="trigger"><strong>Precondition:</strong> <span class="badge badge-rejected">REJECTED</span> &nbsp;&bull;&nbsp; <strong>API:</strong> <code>POST /api/requests/&lt;id&gt;/revise</code></div>
+    <ol class="step-list">
+        <li>Creator opens the rejected request</li>
+        <li>Can modify: Business Justification, Expected Outcome, Risk Assessment</li>
+        <li><strong>Option A:</strong> Save as Draft &rarr; <span class="badge badge-draft">DRAFT</span> with optional draft comment</li>
+        <li><strong>Option B:</strong> Submit for Approval &rarr; <span class="badge badge-submitted">SUBMITTED</span> directly (bypasses DRAFT)</li>
+    </ol>
+</div>
+
+<h2>Approval Log (Audit Trail)</h2>
+
+<div class="card">
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:16px;">The application displays a chronological Approval Log on each request detail view, reconstructed from the stored approval fields. Example:</p>
+    <div class="log-preview">
+        <div class="log-row">
+            <div class="lr-badge"><span class="badge badge-draft">Created</span></div>
+            <div class="lr-user">Tracy LeGrand</div>
+            <div class="lr-title">Account Executive</div>
+            <div class="lr-comment"></div>
+            <div class="lr-date">Feb 15, 2026 9:30 AM</div>
+        </div>
+        <div class="log-row">
+            <div class="lr-badge"><span class="badge badge-submitted">Submitted</span></div>
+            <div class="lr-user">Tracy LeGrand</div>
+            <div class="lr-title">Account Executive</div>
+            <div class="lr-comment">"High priority account needs immediate support"</div>
+            <div class="lr-date">Feb 15, 2026 9:45 AM</div>
+        </div>
+        <div class="log-row">
+            <div class="lr-badge"><span class="badge badge-dm">DM Approved</span></div>
+            <div class="lr-user">DM Manager</div>
+            <div class="lr-title">District Manager</div>
+            <div class="lr-comment">"Strong business case. Approved."</div>
+            <div class="lr-date">Feb 16, 2026 2:15 PM</div>
+        </div>
+        <div class="log-row">
+            <div class="lr-badge"><span class="badge badge-rd">RD Approved</span></div>
+            <div class="lr-user">Regional Director</div>
+            <div class="lr-title">Regional Director</div>
+            <div class="lr-comment"></div>
+            <div class="lr-date">Feb 17, 2026 10:00 AM</div>
+        </div>
+        <div class="log-row" style="background: #ECFDF5;">
+            <div class="lr-badge"><span class="badge" style="background: #A7F3D0; color: #065F46;">&#x23F3; Pending</span></div>
+            <div class="lr-user" style="color: var(--text-muted);">Area VP</div>
+            <div class="lr-title">Next Approver</div>
+            <div class="lr-comment"></div>
+            <div class="lr-date"></div>
+        </div>
+    </div>
+</div>
+
+<h2>API Endpoint Summary</h2>
+
+<table>
+    <tr><th>Endpoint</th><th>Method</th><th>Action</th><th>From Status</th><th>To Status</th></tr>
+    <tr><td><code>/api/requests</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Create</td><td>(new)</td><td><span class="badge badge-draft">DRAFT</span></td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;</code></td><td><span class="badge" style="background:#DBEAFE; color:#1E40AF;">PUT</span></td><td>Edit</td><td><span class="badge badge-draft">DRAFT</span></td><td><span class="badge badge-draft">DRAFT</span></td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;</code></td><td><span class="badge" style="background:#FEE2E2; color:#991B1B;">DELETE</span></td><td>Delete</td><td><span class="badge badge-draft">DRAFT</span></td><td>(removed)</td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;/submit</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Submit</td><td><span class="badge badge-draft">DRAFT</span></td><td><span class="badge badge-submitted">SUBMITTED</span></td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;/approve</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Approve</td><td>Any in-review</td><td>Next level</td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;/withdraw</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Withdraw</td><td>Any in-review</td><td><span class="badge badge-draft">DRAFT</span></td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;/send-back</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Send Back</td><td>Any in-review</td><td><span class="badge badge-draft">DRAFT</span></td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;/reject</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Reject</td><td>Any in-review</td><td><span class="badge badge-rejected">REJECTED</span></td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;/deny</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Deny</td><td>Any in-review</td><td><span class="badge badge-denied">DENIED</span></td></tr>
+    <tr><td><code>/api/requests/&lt;id&gt;/revise</code></td><td><span class="badge" style="background:#D1FAE5; color:#065F46;">POST</span></td><td>Revise</td><td><span class="badge badge-rejected">REJECTED</span></td><td><span class="badge badge-draft">DRAFT</span> or <span class="badge badge-submitted">SUBMITTED</span></td></tr>
+</table>
+
+</div>
+</body>
+</html>

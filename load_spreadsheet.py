@@ -4,6 +4,7 @@ import snowflake.connector
 import os
 import re
 from datetime import datetime
+from difflib import SequenceMatcher
 
 SPREADSHEET_PATH = '/Users/tlegrand/Downloads/USMajors - FY27 Investment Tracker.xlsx'
 CONNECTION_NAME = os.getenv("SNOWFLAKE_CONNECTION_NAME") or "DemoAcct"
@@ -23,17 +24,17 @@ STATUS_MAP = {
     'Approved': 'FINAL_APPROVED',
     'Approval Pending': 'SUBMITTED',
     'Not Approved': 'REJECTED',
-    None: 'DRAFT'
 }
 
 REGION_MAP = {
-    'CME': 'Communications, Media & Entertainment',
-    'FSI': 'Financial Services',
-    'FSIGlobals': 'FSI Globals',
-    'HCLS': 'Healthcare & Life Sciences',
-    'MFG': 'Manufacturing',
-    'RCG': 'Retail & Consumer Goods',
-    'RetailCG': 'Retail & Consumer Goods'
+    'CME': 'SCE',
+    'FSI': 'FSI',
+    'FSIGlobals': 'FSIGlobals',
+    'HCLS': 'HCLS',
+    'MFG': 'MFG',
+    'RCG': 'RCG',
+    'RetailCG': 'RCG',
+    'SCE': 'SCE'
 }
 
 def safe_float(val):
@@ -70,6 +71,38 @@ def extract_sfdc_link(cell):
         if url_match:
             return url_match.group(0)
     return None
+
+def map_status(approval_status, amount_val):
+    """Map approval status to database status, defaulting based on amount"""
+    if approval_status and str(approval_status).strip():
+        status_str = str(approval_status).strip()
+        if status_str in STATUS_MAP:
+            return STATUS_MAP[status_str]
+    
+    # Empty approval status: approved if amount > 0, denied if amount <= 0
+    if amount_val and amount_val > 0:
+        return 'FINAL_APPROVED'
+    return 'DENIED'
+
+def fuzzy_match_account(customer_name, ae_lookup, threshold=0.85):
+    """Find the best matching account name using fuzzy matching."""
+    customer_upper = customer_name.upper()
+    
+    # Try exact match first
+    if customer_upper in ae_lookup:
+        return ae_lookup[customer_upper]
+    
+    # Try fuzzy matching
+    best_match = None
+    best_ratio = 0
+    
+    for account_name, ae_info in ae_lookup.items():
+        ratio = SequenceMatcher(None, customer_upper, account_name).ratio()
+        if ratio > best_ratio and ratio >= threshold:
+            best_ratio = ratio
+            best_match = ae_info
+    
+    return best_match
 
 def load_investments():
     wb = openpyxl.load_workbook(SPREADSHEET_PATH)
@@ -129,18 +162,19 @@ def load_investments():
             continue
         
         customer = str(customer).strip()
+        amount_val = safe_float(invest_amt)
         
-        quarter_info = QUARTER_MAP.get(funding_qtr, ('FY2026-Q2', '2025-05-01'))
+        quarter_info = QUARTER_MAP.get(funding_qtr, ('FY2027-Q1', '2026-02-01'))
         investment_quarter = quarter_info[0]
         created_at = quarter_info[1]
         
-        status = STATUS_MAP.get(approval_status, 'DRAFT')
+        status = map_status(approval_status, amount_val)
         
         if status == 'FINAL_APPROVED':
             approval_level = 5
         elif status == 'SUBMITTED':
             approval_level = 1
-        elif status == 'REJECTED':
+        elif status in ('REJECTED', 'DENIED'):
             approval_level = 0
         else:
             approval_level = 0
@@ -154,10 +188,19 @@ def load_investments():
         else:
             request_title = f"{customer} - {investment_quarter} Investment"
         
-        ae_info = ae_lookup.get(customer.upper(), {})
-        created_by = ae_info.get('rep_name', 'tlegrand')
-        created_by_name = ae_info.get('rep_name', 'Todd Legrand')
-        created_by_employee_id = ae_info.get('employee_id')
+        # Truncate request_title to fit database column (500 chars)
+        if len(request_title) > 500:
+            request_title = request_title[:497] + "..."
+        
+        ae_info = fuzzy_match_account(customer, ae_lookup)
+        if ae_info:
+            created_by = ae_info.get('rep_name', 'system')
+            created_by_name = ae_info.get('rep_name', 'System Generated')
+            created_by_employee_id = ae_info.get('employee_id')
+        else:
+            created_by = 'system'
+            created_by_name = 'System Generated'
+            created_by_employee_id = None
         
         insert_sql = """
         INSERT INTO INVESTMENT_REQUESTS (
@@ -194,10 +237,10 @@ def load_investments():
             request_title,
             customer,
             inv_type,
-            safe_float(invest_amt),
+            amount_val,
             investment_quarter,
             safe_str(justification),
-            'USMajors',
+            'US Majors',
             industry_segment,
             status,
             approval_level,

@@ -15,6 +15,10 @@ class DataService: ObservableObject {
     @Published var isLoading = false
     @Published var lastError: String?
     @Published var cacheProgress = CacheProgress()
+    @Published var impersonationStatus = ImpersonationStatus(active: false, employeeId: nil, displayName: nil, title: nil)
+    @Published var sfdcTheaters: [String] = []
+    @Published var sfdcIndustries: [String] = []
+    @Published var sfdcIndustriesByTheater: [String: [String]] = [:]
     
     private let dateFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -27,18 +31,19 @@ class DataService: ObservableObject {
         d.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
             let dateString = try container.decode(String.self)
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withFullDate]
-            if let date = formatter.date(from: dateString) {
-                return date
-            }
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: dateString) {
-                return date
-            }
-            formatter.formatOptions = [.withInternetDateTime]
-            if let date = formatter.date(from: dateString) {
-                return date
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = iso.date(from: dateString) { return date }
+            iso.formatOptions = [.withInternetDateTime]
+            if let date = iso.date(from: dateString) { return date }
+            iso.formatOptions = [.withFullDate]
+            if let date = iso.date(from: dateString) { return date }
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.timeZone = TimeZone(secondsFromGMT: 0)
+            for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss"] {
+                df.dateFormat = fmt
+                if let date = df.date(from: dateString) { return date }
             }
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date: \(dateString)")
         }
@@ -206,22 +211,70 @@ class DataService: ObservableObject {
                 return
             }
             
-            self.waitForCacheReady {
-                self.stopProgressPolling()
-                self.loadAllData {
-                    if self.summary == nil {
-                        print("Data load failed, retrying...")
-                        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-                            self.loadAllData {
-                                DispatchQueue.main.async { completion() }
-                            }
+            self.clearImpersonation {
+                self.waitForCacheReady { cacheSuccess in
+                    self.stopProgressPolling()
+                    if !cacheSuccess {
+                        DispatchQueue.main.async {
+                            self.lastError = self.cacheProgress.message.isEmpty ? "Cache refresh failed" : self.cacheProgress.message
+                            self.isLoading = false
+                            completion()
                         }
-                    } else {
-                        DispatchQueue.main.async { completion() }
+                        return
+                    }
+                    self.loadAllData {
+                        if self.summary == nil {
+                            print("Data load failed, retrying...")
+                            DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                                self.loadAllData {
+                                    DispatchQueue.main.async { completion() }
+                                }
+                            }
+                        } else {
+                            DispatchQueue.main.async { completion() }
+                        }
                     }
                 }
             }
         }
+    }
+    
+    func retryCacheRefresh(completion: @escaping () -> Void) {
+        lastError = nil
+        cacheProgress = CacheProgress()
+        cacheProgress.status = "loading"
+        cacheProgress.message = "Retrying..."
+        
+        guard let url = URL(string: "\(baseURL)/cache/refresh") else {
+            lastError = "Invalid retry URL"
+            completion()
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        session.dataTask(with: request) { [weak self] _, _, _ in
+            guard let self = self else { return }
+            self.startProgressPolling()
+            self.waitForCacheReady { cacheSuccess in
+                self.stopProgressPolling()
+                if !cacheSuccess {
+                    DispatchQueue.main.async {
+                        self.lastError = self.cacheProgress.message.isEmpty ? "Cache refresh failed" : self.cacheProgress.message
+                        self.isLoading = false
+                        completion()
+                    }
+                    return
+                }
+                self.loadAllData {
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        completion()
+                    }
+                }
+            }
+        }.resume()
     }
     
     private func loadAllData(completion: @escaping () -> Void) {
@@ -238,6 +291,8 @@ class DataService: ObservableObject {
         
         group.enter()
         self.loadAnnualBudgets { group.leave() }
+        
+        self.fetchTheatersAndIndustries()
         
         group.notify(queue: .main) {
             completion()
@@ -277,15 +332,19 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    private func waitForCacheReady(completion: @escaping () -> Void) {
+    private func waitForCacheReady(completion: @escaping (Bool) -> Void) {
         func checkProgress(attempt: Int) {
             guard attempt < 300 else {
-                DispatchQueue.main.async { completion() }
+                DispatchQueue.main.async {
+                    self.cacheProgress.status = "error"
+                    self.cacheProgress.message = "Timed out waiting for cache to load"
+                    completion(false)
+                }
                 return
             }
             
             guard let url = URL(string: "\(baseURL)/cache/progress") else {
-                DispatchQueue.main.async { completion() }
+                DispatchQueue.main.async { completion(false) }
                 return
             }
             
@@ -308,7 +367,9 @@ class DataService: ObservableObject {
                 }
                 
                 if status == "complete" {
-                    DispatchQueue.main.async { completion() }
+                    DispatchQueue.main.async { completion(true) }
+                } else if status == "error" {
+                    DispatchQueue.main.async { completion(false) }
                 } else {
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) {
                         checkProgress(attempt: attempt + 1)
@@ -379,12 +440,29 @@ class DataService: ObservableObject {
             DispatchQueue.main.async {
                 self?.isLoading = false
                 defer { completion() }
-                guard let self = self, let data = data else { return }
+                guard let self = self else { return }
+                
+                if let error = error {
+                    self.lastError = "Network error: \(error.localizedDescription)"
+                    return
+                }
+                
+                guard let data = data else {
+                    self.lastError = "No data received from server"
+                    return
+                }
+                
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    self.lastError = "Server error (HTTP \(httpResponse.statusCode))"
+                    return
+                }
                 
                 do {
                     self.investmentRequests = try self.decoder.decode([InvestmentRequest].self, from: data)
+                    self.lastError = nil
                 } catch {
                     print("Error decoding investment requests: \(error)")
+                    self.lastError = "Failed to decode investment requests: \(error.localizedDescription)"
                 }
             }
         }.resume()
@@ -434,26 +512,53 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    func searchAccounts(query: String, completion: @escaping ([SFDCAccount]) -> Void) {
+    func searchAccounts(query: String, completion: @escaping ([SFDCAccount], Int) -> Void) {
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "\(baseURL)/accounts/search?q=\(encodedQuery)") else {
-            completion([])
+            completion([], 0)
             return
         }
         
         session.dataTask(with: url) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self, let data = data else {
-                    completion([])
+                    completion([], 0)
                     return
                 }
                 
                 do {
-                    let accounts = try self.decoder.decode([SFDCAccount].self, from: data)
-                    completion(accounts)
+                    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    let totalMatches = json?["total_matches"] as? Int ?? 0
+                    if let accountsData = try? JSONSerialization.data(withJSONObject: json?["accounts"] ?? []),
+                       let accounts = try? self.decoder.decode([SFDCAccount].self, from: accountsData) {
+                        completion(accounts, totalMatches)
+                    } else {
+                        completion([], 0)
+                    }
                 } catch {
                     print("Error decoding accounts: \(error)")
-                    completion([])
+                    completion([], 0)
+                }
+            }
+        }.resume()
+    }
+    
+    func fetchTheatersAndIndustries() {
+        guard let url = URL(string: "\(baseURL)/lookup/theaters-industries") else { return }
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self, let data = data else { return }
+                
+                do {
+                    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    self.sfdcTheaters = (json?["theaters"] as? [String]) ?? []
+                    self.sfdcIndustries = (json?["industries"] as? [String]) ?? []
+                    if let combos = json?["industries_by_theater"] as? [String: [String]] {
+                        self.sfdcIndustriesByTheater = combos
+                    }
+                } catch {
+                    print("Error fetching theaters/industries: \(error)")
                 }
             }
         }.resume()
@@ -483,7 +588,7 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    func createRequest(title: String, accountId: String?, accountName: String?, investmentType: String?, amount: Double?, quarter: String?, justification: String?, expectedOutcome: String?, riskAssessment: String?, theater: String?, industrySegment: String?, completion: @escaping (Bool, Int?) -> Void) {
+    func createRequest(title: String, accountId: String?, accountName: String?, investmentType: String?, amount: Double?, quarter: String?, justification: String?, expectedOutcome: String?, riskAssessment: String?, theater: String?, industrySegment: String?, salesforceURL: String? = nil, expectedROI: String? = nil, autoSubmit: Bool = false, submitComment: String? = nil, completion: @escaping (Bool, Int?) -> Void) {
         guard let url = URL(string: "\(baseURL)/requests") else {
             completion(false, nil)
             return
@@ -503,6 +608,10 @@ class DataService: ObservableObject {
         if let riskAssessment = riskAssessment { body["RISK_ASSESSMENT"] = riskAssessment }
         if let theater = theater { body["THEATER"] = theater }
         if let industrySegment = industrySegment { body["INDUSTRY_SEGMENT"] = industrySegment }
+        if let salesforceURL = salesforceURL, !salesforceURL.isEmpty { body["SFDC_OPPORTUNITY_LINK"] = salesforceURL }
+        if let expectedROI = expectedROI, !expectedROI.isEmpty { body["EXPECTED_ROI"] = expectedROI }
+        if autoSubmit { body["AUTO_SUBMIT"] = true }
+        if let submitComment = submitComment { body["SUBMIT_COMMENT"] = submitComment }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -526,7 +635,7 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    func updateRequest(requestId: Int, title: String?, accountId: String?, accountName: String?, investmentType: String?, amount: Double?, quarter: String?, justification: String?, expectedOutcome: String?, riskAssessment: String?, completion: @escaping (Bool) -> Void) {
+    func updateRequest(requestId: Int, title: String?, accountId: String?, accountName: String?, investmentType: String?, amount: Double?, quarter: String?, justification: String?, expectedOutcome: String?, riskAssessment: String?, theater: String?, industrySegment: String?, salesforceURL: String? = nil, expectedROI: String? = nil, draftComment: String? = nil, autoSubmit: Bool = false, submitComment: String? = nil, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: "\(baseURL)/requests/\(requestId)") else {
             completion(false)
             return
@@ -542,6 +651,13 @@ class DataService: ObservableObject {
         if let justification = justification { body["BUSINESS_JUSTIFICATION"] = justification }
         if let expectedOutcome = expectedOutcome { body["EXPECTED_OUTCOME"] = expectedOutcome }
         if let riskAssessment = riskAssessment { body["RISK_ASSESSMENT"] = riskAssessment }
+        if let theater = theater { body["THEATER"] = theater }
+        if let industrySegment = industrySegment { body["INDUSTRY_SEGMENT"] = industrySegment }
+        if let salesforceURL = salesforceURL { body["SFDC_OPPORTUNITY_LINK"] = salesforceURL }
+        if let expectedROI = expectedROI { body["EXPECTED_ROI"] = expectedROI }
+        if let draftComment = draftComment { body["DRAFT_COMMENT"] = draftComment }
+        if autoSubmit { body["AUTO_SUBMIT"] = true }
+        if let submitComment = submitComment { body["SUBMIT_COMMENT"] = submitComment }
         
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
@@ -582,15 +698,19 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    func submitRequest(requestId: Int, completion: @escaping (Bool, String?) -> Void) {
+    func submitRequest(requestId: Int, comment: String? = nil, completion: @escaping (Bool, String?) -> Void) {
         guard let url = URL(string: "\(baseURL)/requests/\(requestId)/submit") else {
             completion(false, "Invalid URL")
             return
         }
         
+        var body: [String: Any] = [:]
+        if let comment = comment { body["COMMENT"] = comment }
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         session.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
@@ -609,7 +729,7 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    func withdrawRequest(requestId: Int, completion: @escaping (Bool, String?) -> Void) {
+    func withdrawRequest(requestId: Int, comment: String? = nil, completion: @escaping (Bool, String?) -> Void) {
         guard let url = URL(string: "\(baseURL)/requests/\(requestId)/withdraw") else {
             completion(false, "Invalid URL")
             return
@@ -618,6 +738,10 @@ class DataService: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        var body: [String: Any] = [:]
+        if let comment = comment { body["COMMENT"] = comment }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         session.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
@@ -671,6 +795,104 @@ class DataService: ObservableObject {
     
     func rejectRequest(requestId: Int, comments: String?, completion: @escaping (Bool, String?) -> Void) {
         guard let url = URL(string: "\(baseURL)/requests/\(requestId)/reject") else {
+            completion(false, "Invalid URL")
+            return
+        }
+        
+        var body: [String: Any] = [:]
+        if let comments = comments { body["COMMENTS"] = comments }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        session.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self.loadInvestmentRequests()
+                    self.loadSummary()
+                    completion(true, nil)
+                } else {
+                    var errorMsg = "Unknown error"
+                    if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let err = json["error"] as? String {
+                        errorMsg = err
+                    }
+                    completion(false, errorMsg)
+                }
+            }
+        }.resume()
+    }
+    
+    func reviseRequest(requestId: Int, justification: String, outcome: String, risk: String, submit: Bool, comment: String? = nil, completion: @escaping (Bool, String?) -> Void) {
+        guard let url = URL(string: "\(baseURL)/requests/\(requestId)/revise") else {
+            completion(false, "Invalid URL")
+            return
+        }
+        
+        var body: [String: Any] = [
+            "BUSINESS_JUSTIFICATION": justification,
+            "EXPECTED_OUTCOME": outcome,
+            "RISK_ASSESSMENT": risk,
+            "SUBMIT": submit
+        ]
+        if let comment = comment { body["COMMENT"] = comment }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        session.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self.loadInvestmentRequests()
+                    self.loadSummary()
+                    completion(true, nil)
+                } else {
+                    var errorMsg = "Unknown error"
+                    if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let err = json["error"] as? String {
+                        errorMsg = err
+                    }
+                    completion(false, errorMsg)
+                }
+            }
+        }.resume()
+    }
+    
+    func sendBackForRevision(requestId: Int, comments: String?, completion: @escaping (Bool, String?) -> Void) {
+        guard let url = URL(string: "\(baseURL)/requests/\(requestId)/send-back") else {
+            completion(false, "Invalid URL")
+            return
+        }
+        
+        var body: [String: Any] = [:]
+        if let comments = comments { body["COMMENTS"] = comments }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        session.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self.loadInvestmentRequests()
+                    self.loadSummary()
+                    completion(true, nil)
+                } else {
+                    var errorMsg = "Unknown error"
+                    if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let err = json["error"] as? String {
+                        errorMsg = err
+                    }
+                    completion(false, errorMsg)
+                }
+            }
+        }.resume()
+    }
+    
+    func denyRequest(requestId: Int, comments: String?, completion: @escaping (Bool, String?) -> Void) {
+        guard let url = URL(string: "\(baseURL)/requests/\(requestId)/deny") else {
             completion(false, "Invalid URL")
             return
         }
@@ -762,6 +984,164 @@ class DataService: ObservableObject {
                     completion(opps)
                 } catch {
                     print("Error decoding linked opportunities: \(error)")
+                    completion([])
+                }
+            }
+        }.resume()
+    }
+    
+    func searchEmployees(query: String, completion: @escaping ([WorkdayEmployee]) -> Void) {
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(baseURL)/employees/search?q=\(encodedQuery)") else {
+            completion([])
+            return
+        }
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self, let data = data else {
+                    completion([])
+                    return
+                }
+                
+                do {
+                    let employees = try self.decoder.decode([WorkdayEmployee].self, from: data)
+                    completion(employees)
+                } catch {
+                    print("Error decoding employees: \(error)")
+                    completion([])
+                }
+            }
+        }.resume()
+    }
+    
+    func impersonate(employeeId: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "\(baseURL)/impersonate") else {
+            completion(false)
+            return
+        }
+        
+        let body: [String: Any] = ["EMPLOYEE_ID": Int(employeeId) ?? 0]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        session.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self.loadCurrentUser {}
+                    self.checkImpersonationStatus()
+                    self.loadSummary()
+                    self.loadInvestmentRequests()
+                    completion(true)
+                } else {
+                    completion(false)
+                }
+            }
+        }.resume()
+    }
+    
+    func stopImpersonating(completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "\(baseURL)/stop-impersonate") else {
+            completion(false)
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        session.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self.impersonationStatus = ImpersonationStatus(active: false, employeeId: nil, displayName: nil, title: nil)
+                    self.loadCurrentUser {}
+                    self.loadSummary()
+                    self.loadInvestmentRequests()
+                    completion(true)
+                } else {
+                    completion(false)
+                }
+            }
+        }.resume()
+    }
+    
+    private func clearImpersonation(completion: @escaping () -> Void) {
+        guard let url = URL(string: "\(baseURL)/stop-impersonate") else {
+            completion()
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        session.dataTask(with: request) { [weak self] _, _, _ in
+            DispatchQueue.main.async {
+                self?.impersonationStatus = ImpersonationStatus(active: false, employeeId: nil, displayName: nil, title: nil)
+            }
+            completion()
+        }.resume()
+    }
+
+    func checkImpersonationStatus() {
+        guard let url = URL(string: "\(baseURL)/impersonate/status") else { return }
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self, let data = data else { return }
+                
+                do {
+                    self.impersonationStatus = try self.decoder.decode(ImpersonationStatus.self, from: data)
+                } catch {
+                    print("Error decoding impersonation status: \(error)")
+                }
+            }
+        }.resume()
+    }
+    
+    func fetchApprovalSteps(requestId: Int, completion: @escaping ([ApprovalStep]) -> Void) {
+        guard let url = URL(string: "\(baseURL)/requests/\(requestId)/steps") else {
+            completion([])
+            return
+        }
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self, let data = data else {
+                    completion([])
+                    return
+                }
+                
+                do {
+                    let steps = try self.decoder.decode([ApprovalStep].self, from: data)
+                    completion(steps)
+                } catch {
+                    print("Error decoding approval steps: \(error)")
+                    completion([])
+                }
+            }
+        }.resume()
+    }
+    
+    func fetchApprovalChain(employeeId: Int, theater: String, completion: @escaping ([ApprovalChainEntry]) -> Void) {
+        guard let url = URL(string: "\(baseURL)/approval-chain?employee_id=\(employeeId)&theater=\(theater.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? theater)") else {
+            completion([])
+            return
+        }
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self, let data = data else {
+                    completion([])
+                    return
+                }
+                
+                do {
+                    let chain = try self.decoder.decode([ApprovalChainEntry].self, from: data)
+                    completion(chain)
+                } catch {
+                    print("Error decoding approval chain: \(error)")
                     completion([])
                 }
             }

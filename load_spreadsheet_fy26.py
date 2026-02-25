@@ -3,6 +3,7 @@ import openpyxl
 import snowflake.connector
 import os
 import re
+from difflib import SequenceMatcher
 
 SPREADSHEET_PATH = '/Users/tlegrand/Downloads/Investments Tracker  - Majors .xlsx'
 CONNECTION_NAME = os.getenv("SNOWFLAKE_CONNECTION_NAME") or "DemoAcct"
@@ -21,16 +22,20 @@ JB_APPROVAL_MAP = {
     'n': 'REJECTED',
     'maybe': 'SUBMITTED',
     'pending': 'SUBMITTED',
+    'conditional': 'SUBMITTED',
+    'contingent': 'SUBMITTED',
+    'not yet': 'SUBMITTED',
 }
 
 REGION_MAP = {
-    'CME': 'Communications, Media & Entertainment',
-    'FSI': 'Financial Services',
-    'FSIGlobals': 'FSI Globals',
-    'HCLS': 'Healthcare & Life Sciences',
-    'MFG': 'Manufacturing',
-    'RCG': 'Retail & Consumer Goods',
-    'RetailCG': 'Retail & Consumer Goods'
+    'CME': 'SCE',
+    'FSI': 'FSI',
+    'FSIGlobals': 'FSIGlobals',
+    'HCLS': 'HCLS',
+    'MFG': 'MFG',
+    'RCG': 'RCG',
+    'RetailCG': 'RCG',
+    'SCE': 'SCE'
 }
 
 SHEET_CONFIGS = {
@@ -141,11 +146,56 @@ def get_cell_value(ws, row, col):
         return None
     return ws.cell(row=row, column=col).value
 
-def map_jb_approval_to_status(val):
-    if val is None:
-        return 'DRAFT'
+def map_jb_approval_to_status(val, amount_val):
+    if val is None or str(val).strip() == '':
+        # Empty JB Approval: approved if amount > 0, denied if amount <= 0
+        if amount_val and amount_val > 0:
+            return 'FINAL_APPROVED'
+        else:
+            return 'DENIED'
+    
     s = str(val).strip().lower()
-    return JB_APPROVAL_MAP.get(s, 'DRAFT')
+    
+    # Check exact matches first
+    if s in JB_APPROVAL_MAP:
+        return JB_APPROVAL_MAP[s]
+    
+    # Check if starts with 'yes' (e.g., 'Yes - Better for APEX...')
+    if s.startswith('yes'):
+        return 'FINAL_APPROVED'
+    
+    # Check for rejected indicators
+    if 'requires additional' in s or 'see comment' in s or 'see note' in s:
+        return 'REJECTED'
+    
+    # Check for conditional/submitted indicators
+    if 'conditional' in s or 'contingent' in s or 'maybe' in s:
+        return 'SUBMITTED'
+    
+    # Default: approved if amount > 0, denied otherwise
+    if amount_val and amount_val > 0:
+        return 'FINAL_APPROVED'
+    return 'DENIED'
+
+def fuzzy_match_account(customer_name, ae_lookup, threshold=0.85):
+    """Find the best matching account name using fuzzy matching."""
+    customer_upper = customer_name.upper()
+    
+    # Try exact match first
+    if customer_upper in ae_lookup:
+        return ae_lookup[customer_upper]
+    
+    # Try fuzzy matching
+    best_match = None
+    best_ratio = 0
+    
+    for account_name, ae_info in ae_lookup.items():
+        ratio = SequenceMatcher(None, customer_upper, account_name).ratio()
+        if ratio > best_ratio and ratio >= threshold:
+            best_ratio = ratio
+            best_match = ae_info
+    
+    return best_match
 
 def load_investments():
     wb = openpyxl.load_workbook(SPREADSHEET_PATH)
@@ -222,13 +272,13 @@ def load_investments():
                 sfdc_request_id = safe_str(get_cell_value(ws, row_num, config['sfdc_request_col']))
             
             industry_segment = REGION_MAP.get(industry, industry if industry else 'Enterprise')
-            status = map_jb_approval_to_status(jb_approval)
+            status = map_jb_approval_to_status(jb_approval, amount_val)
             
             if status == 'FINAL_APPROVED':
                 approval_level = 5
             elif status == 'SUBMITTED':
                 approval_level = 1
-            elif status == 'REJECTED':
+            elif status in ('REJECTED', 'DENIED'):
                 approval_level = 0
             else:
                 approval_level = 0
@@ -249,10 +299,15 @@ def load_investments():
             elif 'PS' in inv_type.upper():
                 inv_type = 'PS&T'
             
-            ae_info = ae_lookup.get(customer.upper(), {})
-            created_by = ae_info.get('rep_name', 'tlegrand')
-            created_by_name = ae_info.get('rep_name', 'Todd Legrand')
-            created_by_employee_id = ae_info.get('employee_id')
+            ae_info = fuzzy_match_account(customer, ae_lookup)
+            if ae_info:
+                created_by = ae_info.get('rep_name', 'system')
+                created_by_name = ae_info.get('rep_name', 'System Generated')
+                created_by_employee_id = ae_info.get('employee_id')
+            else:
+                created_by = 'system'
+                created_by_name = 'System Generated'
+                created_by_employee_id = None
             
             insert_sql = """
             INSERT INTO INVESTMENT_REQUESTS (
@@ -288,7 +343,7 @@ def load_investments():
                 amount_val,
                 investment_quarter,
                 justification,
-                'USMajors',
+                'US Majors',
                 industry_segment,
                 status,
                 approval_level,

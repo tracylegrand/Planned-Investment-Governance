@@ -22,7 +22,7 @@ ICON=$(jq -r '.icon' "$CONFIG_FILE")
 API_PORT=$(jq -r '.api_port' "$CONFIG_FILE")
 CACHE_DB=$(jq -r '.cache_db' "$CONFIG_FILE")
 
-APP_PATH="/Applications/${APP_NAME}.app"
+APP_PATH="$HOME/Documents/My Apps/${APP_NAME}.app"
 INFO_PLIST_TEMPLATE="${PROJECT_DIR}/Info.plist.template"
 
 echo "=========================================="

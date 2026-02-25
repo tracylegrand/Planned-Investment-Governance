@@ -16,3 +16,6 @@ DerivedData/
 .swiftpm/
 Packages/
 Package.resolved
+build/
+*.app/
+.snowflake/

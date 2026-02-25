@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investment Governance - Data Sources</title>
+<style>
+:root {
+    --snow-blue: #29B5E8;
+    --snow-dark: #11567F;
+    --snow-navy: #0D2B45;
+    --snow-light: #E8F7FC;
+    --bg: #F6F8FA;
+    --card-bg: #FFFFFF;
+    --text: #1E293B;
+    --text-muted: #64748B;
+    --border: #E2E8F0;
+    --green: #10B981;
+    --amber: #F59E0B;
+    --red: #EF4444;
+    --purple: #8B5CF6;
+    --orange: #F97316;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.header { background: linear-gradient(135deg, var(--snow-navy) 0%, var(--snow-dark) 100%); color: white; padding: 48px 0; text-align: center; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 8px; }
+.header p { font-size: 1.1rem; opacity: 0.85; max-width: 700px; margin: 0 auto; }
+.container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+.nav-bar { display: flex; gap: 12px; margin-bottom: 32px; flex-wrap: wrap; }
+.nav-bar a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: var(--snow-dark); font-weight: 500; font-size: 0.9rem; transition: all 0.2s; }
+.nav-bar a:hover { border-color: var(--snow-blue); background: var(--snow-light); }
+.nav-bar a.active { background: var(--snow-blue); color: white; border-color: var(--snow-blue); }
+h2 { font-size: 1.5rem; font-weight: 700; color: var(--snow-navy); margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--snow-blue); }
+h3 { font-size: 1.15rem; font-weight: 600; color: var(--snow-dark); margin: 24px 0 12px; }
+.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.card-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0; }
+.card-header h3 { margin: 0; }
+.card-header .subtitle { font-size: 0.85rem; color: var(--text-muted); font-weight: 400; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.badge-blue { background: #DBEAFE; color: #1E40AF; }
+.badge-green { background: #D1FAE5; color: #065F46; }
+.badge-amber { background: #FEF3C7; color: #92400E; }
+.badge-gray { background: #F1F5F9; color: #475569; }
+.badge-purple { background: #EDE9FE; color: #5B21B6; }
+.badge-red { background: #FEE2E2; color: #991B1B; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+th { background: var(--snow-navy); color: white; padding: 10px 14px; text-align: left; font-weight: 600; }
+th:first-child { border-radius: 8px 0 0 0; }
+th:last-child { border-radius: 0 8px 0 0; }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--snow-light); }
+code { background: #F1F5F9; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; color: var(--snow-dark); font-family: 'SF Mono', 'Fira Code', monospace; }
+.overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 24px 0; }
+.stat-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; text-align: center; }
+.stat-card .number { font-size: 1.8rem; font-weight: 700; color: var(--snow-dark); }
+.stat-card .label { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+.flow-diagram { background: var(--snow-navy); border-radius: 12px; padding: 32px; margin: 24px 0; overflow-x: auto; }
+.flow-row { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: nowrap; }
+.flow-node { background: white; border-radius: 10px; padding: 14px 18px; text-align: center; min-width: 140px; position: relative; }
+.flow-node .fn-title { font-weight: 700; font-size: 0.85rem; color: var(--snow-navy); }
+.flow-node .fn-detail { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+.flow-node .fn-count { font-size: 1.1rem; font-weight: 700; color: var(--snow-blue); margin-top: 2px; }
+.flow-arrow { color: var(--snow-blue); font-size: 1.6rem; padding: 0 6px; flex-shrink: 0; }
+.flow-arrow-down { text-align: center; color: var(--snow-blue); font-size: 1.6rem; padding: 8px 0; }
+.flow-label { color: white; font-size: 0.75rem; text-align: center; opacity: 0.8; padding: 2px 0; }
+.columns-group { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.col-card { background: #F8FAFC; border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+.col-card h4 { font-size: 0.85rem; font-weight: 600; color: var(--snow-dark); margin-bottom: 6px; }
+.col-card ul { list-style: none; padding: 0; }
+.col-card ul li { font-size: 0.82rem; color: var(--text-muted); padding: 2px 0; }
+.col-card ul li code { font-size: 0.8em; }
+.arch-diagram { background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 12px; padding: 32px; margin: 24px 0; }
+.arch-layer { margin: 12px 0; }
+.arch-layer-label { color: var(--snow-blue); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.arch-boxes { display: flex; gap: 12px; flex-wrap: wrap; }
+.arch-box { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; color: white; flex: 1; min-width: 180px; }
+.arch-box .ab-title { font-weight: 600; font-size: 0.9rem; }
+.arch-box .ab-detail { font-size: 0.78rem; opacity: 0.7; margin-top: 4px; }
+.arch-connector { text-align: center; color: var(--snow-blue); font-size: 1.4rem; padding: 4px 0; }
+.role-card { display: flex; align-items: center; gap: 16px; padding: 16px; background: #F8FAFC; border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; }
+.role-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0; }
+.role-info h4 { font-weight: 600; margin-bottom: 2px; }
+.role-info p { font-size: 0.85rem; color: var(--text-muted); }
+.section-intro { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 20px; line-height: 1.7; }
+.tag-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Data Sources</h1>
+    <p>All input data sources for the Investment Governance application with fully described source locations, ownership, and data flows.</p>
+</div>
+
+<div class="container">
+
+<div class="nav-bar">
+    <a href="DATA_SOURCES.html" class="active">Data Sources</a>
+    <a href="REQUEST_LIFECYCLE.html">Request Lifecycle</a>
+    <a href="APPROVAL_HIERARCHY.html">Approval Hierarchy</a>
+</div>
+
+<h2>System Overview</h2>
+<p class="section-intro">The application sources data from three primary systems, unified through Snowflake and cached locally in SQLite for fast macOS client access.</p>
+
+<div class="overview-grid">
+    <div class="stat-card">
+        <div class="number">8</div>
+        <div class="label">Snowflake Tables</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">2</div>
+        <div class="label">Snowflake Views</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">3</div>
+        <div class="label">External Sources</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">6</div>
+        <div class="label">Cache Tables</div>
+    </div>
+</div>
+
+<div class="arch-diagram">
+    <div class="arch-layer">
+        <div class="arch-layer-label">External Sources</div>
+        <div class="arch-boxes">
+            <div class="arch-box" style="border-color: #F59E0B;">
+                <div class="ab-title">Salesforce (SFDC)</div>
+                <div class="ab-detail">266,743 opportunity rows via Snowflake certified share</div>
+            </div>
+            <div class="arch-box" style="border-color: #8B5CF6;">
+                <div class="ab-title">Workday HR</div>
+                <div class="ab-detail">Employee identity, title, manager, cost center</div>
+            </div>
+        </div>
+    </div>
+    <div class="arch-connector">&#x25BC;</div>
+    <div class="arch-layer">
+        <div class="arch-layer-label">Snowflake (TEMP.INVESTMENT_GOVERNANCE)</div>
+        <div class="arch-boxes">
+            <div class="arch-box">
+                <div class="ab-title">INVESTMENT_REQUESTS</div>
+                <div class="ab-detail">232 rows &middot; Primary data</div>
+            </div>
+            <div class="arch-box">
+                <div class="ab-title">USERS</div>
+                <div class="ab-detail">2 rows &middot; Roles &amp; hierarchy</div>
+            </div>
+            <div class="arch-box">
+                <div class="ab-title">SFDC_ACCOUNTS</div>
+                <div class="ab-detail">69,203 rows &middot; Account lookup</div>
+            </div>
+            <div class="arch-box">
+                <div class="ab-title">ANNUAL_BUDGETS</div>
+                <div class="ab-detail">12 rows &middot; Budget allocations</div>
+            </div>
+        </div>
+    </div>
+    <div class="arch-connector">&#x25BC;</div>
+    <div class="arch-layer">
+        <div class="arch-layer-label">Local Cache (SQLite &mdash; cache.db)</div>
+        <div class="arch-boxes">
+            <div class="arch-box" style="border-color: #10B981;">
+                <div class="ab-title">Flask API Server</div>
+                <div class="ab-detail">Port 8770 &middot; Cache-first read/write &middot; Background Snowflake sync</div>
+            </div>
+        </div>
+    </div>
+    <div class="arch-connector">&#x25BC;</div>
+    <div class="arch-layer">
+        <div class="arch-layer-label">Client Application</div>
+        <div class="arch-boxes">
+            <div class="arch-box" style="border-color: #29B5E8;">
+                <div class="ab-title">macOS SwiftUI App</div>
+                <div class="ab-detail">Investment Governance.app &middot; Dashboard, Requests, Approvals</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2>1. Snowflake &mdash; Primary Data Store</h2>
+<p class="section-intro">
+    <strong>Account:</strong> <code>SFCOGSOPS-SNOWHOUSE_AWS_US_WEST_2</code><br>
+    <strong>Database/Schema:</strong> <code>TEMP.INVESTMENT_GOVERNANCE</code><br>
+    <strong>Owner Role:</strong> <code>TECHNICAL_ACCOUNT_MANAGER</code><br>
+    <strong>Connection:</strong> <code>DemoAcct</code> (configured in <code>config/standard.json</code>)
+</p>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #DBEAFE; color: #1E40AF;">&#x1F4CB;</div>
+        <div><h3>INVESTMENT_REQUESTS <span class="badge badge-blue">~232 rows</span></h3><div class="subtitle">TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS</div></div>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:14px;">Core table storing all investment requests with status tracking, full approval chain fields, business case content, and audit metadata.</p>
+    <div class="tag-row">
+        <span class="badge badge-blue">PK: REQUEST_ID (autoincrement)</span>
+        <span class="badge badge-green">57 columns</span>
+        <span class="badge badge-gray">Default STATUS = 'DRAFT'</span>
+    </div>
+    <div class="columns-group">
+        <div class="col-card">
+            <h4>Identity &amp; Details</h4>
+            <ul>
+                <li><code>REQUEST_ID</code>, <code>REQUEST_TITLE</code>, <code>ACCOUNT_NAME</code></li>
+                <li><code>INVESTMENT_TYPE</code>, <code>REQUESTED_AMOUNT</code></li>
+                <li><code>INVESTMENT_QUARTER</code>, <code>THEATER</code>, <code>INDUSTRY_SEGMENT</code></li>
+            </ul>
+        </div>
+        <div class="col-card">
+            <h4>Business Case</h4>
+            <ul>
+                <li><code>BUSINESS_JUSTIFICATION</code> (rich text)</li>
+                <li><code>EXPECTED_OUTCOME</code> (rich text)</li>
+                <li><code>RISK_ASSESSMENT</code> (rich text)</li>
+            </ul>
+        </div>
+        <div class="col-card">
+            <h4>Creator &amp; Status</h4>
+            <ul>
+                <li><code>CREATED_BY</code>, <code>CREATED_BY_NAME</code>, <code>CREATED_AT</code></li>
+                <li><code>STATUS</code>, <code>CURRENT_APPROVAL_LEVEL</code></li>
+                <li><code>NEXT_APPROVER_ID</code>, <code>NEXT_APPROVER_NAME</code></li>
+            </ul>
+        </div>
+        <div class="col-card">
+            <h4>Approval Chain</h4>
+            <ul>
+                <li><code>DM_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
+                <li><code>RD_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
+                <li><code>AVP_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
+                <li><code>GVP_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #EDE9FE; color: #5B21B6;">&#x1F465;</div>
+        <div><h3>USERS <span class="badge badge-purple">2 rows</span></h3><div class="subtitle">TEMP.INVESTMENT_GOVERNANCE.USERS</div></div>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:14px;">Defines application roles, approval levels, and hierarchy for participating users.</p>
+    <div class="tag-row">
+        <span class="badge badge-blue">PK: USER_ID (autoincrement)</span>
+        <span class="badge badge-purple">UNIQUE: SNOWFLAKE_USERNAME</span>
+    </div>
+    <table>
+        <tr><th>USER_ID</th><th>USERNAME</th><th>DISPLAY_NAME</th><th>TITLE</th><th>ROLE</th><th>LEVEL</th><th>FINAL?</th></tr>
+        <tr><td>1</td><td><code>TLEGRAND</code></td><td>Tracy LeGrand</td><td>Account Executive</td><td>AE</td><td>1</td><td>No</td></tr>
+        <tr><td>2</td><td><code>JON_BEAULIER</code></td><td>Jon Beaulier</td><td>GVP of Majors</td><td>GVP</td><td>5</td><td style="color:var(--green); font-weight:600;">Yes</td></tr>
+    </table>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #D1FAE5; color: #065F46;">&#x1F4B0;</div>
+        <div><h3>ANNUAL_BUDGETS <span class="badge badge-green">12 rows</span></h3><div class="subtitle">TEMP.INVESTMENT_GOVERNANCE.ANNUAL_BUDGETS</div></div>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:14px;">Annual and quarterly budget allocations by theater, industry, and portfolio.</p>
+    <div class="tag-row">
+        <span class="badge badge-blue">PK: BUDGET_ID (autoincrement)</span>
+        <span class="badge badge-amber">UNIQUE: (FISCAL_YEAR, THEATER, INDUSTRY_SEGMENT, PORTFOLIO)</span>
+    </div>
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;"><strong>Key Columns:</strong> FISCAL_YEAR, THEATER, INDUSTRY_SEGMENT, PORTFOLIO, BUDGET_AMOUNT, ALLOCATED_AMOUNT, Q1&ndash;Q4_BUDGET</p>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #FEF3C7; color: #92400E;">&#x1F3E2;</div>
+        <div><h3>SFDC_ACCOUNTS <span class="badge badge-amber">69,203 rows</span></h3><div class="subtitle">TEMP.INVESTMENT_GOVERNANCE.SFDC_ACCOUNTS</div></div>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:14px;">Deduplicated Salesforce account lookup data. Provides account names, theaters, and industry segments for request creation and filtering.</p>
+    <div class="tag-row">
+        <span class="badge badge-gray">No PK (deduplicated via GROUP BY on cache load)</span>
+    </div>
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;"><strong>Columns:</strong> <code>ACCOUNT_NAME</code>, <code>THEATER</code>, <code>INDUSTRY_SEGMENT</code></p>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div class="card">
+        <div class="card-header">
+            <div class="card-icon" style="background: #F1F5F9; color: #475569;">&#x1F517;</div>
+            <div><h3>REQUEST_OPPORTUNITIES <span class="badge badge-gray">0 rows</span></h3><div class="subtitle">Reserved for future use</div></div>
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-muted);">Links investment requests to SFDC opportunity IDs.</p>
+    </div>
+    <div class="card">
+        <div class="card-header">
+            <div class="card-icon" style="background: #F1F5F9; color: #475569;">&#x1F46B;</div>
+            <div><h3>REQUEST_CONTRIBUTORS <span class="badge badge-gray">0 rows</span></h3><div class="subtitle">Reserved for future use</div></div>
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-muted);">Tracks additional contributors with edit permissions.</p>
+    </div>
+    <div class="card">
+        <div class="card-header">
+            <div class="card-icon" style="background: #F1F5F9; color: #475569;">&#x1F4DD;</div>
+            <div><h3>SUGGESTED_CHANGES <span class="badge badge-gray">0 rows</span></h3><div class="subtitle">Reserved for future use</div></div>
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-muted);">Field-level change suggestions from reviewers.</p>
+    </div>
+    <div class="card">
+        <div class="card-header">
+            <div class="card-icon" style="background: #F1F5F9; color: #475569;">&#x1F4D3;</div>
+            <div><h3>AUDIT_LOG <span class="badge badge-gray">0 rows</span></h3><div class="subtitle">Reserved for future use</div></div>
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-muted);">State change records with before/after snapshots (VARIANT).</p>
+    </div>
+</div>
+
+<h2>2. Salesforce (via Snowflake Shared Data)</h2>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #FEF3C7; color: #92400E;">&#x2601;</div>
+        <div><h3>FCT_SALESFORCE_PROFESSIONAL_SERVICES_OPPORTUNITY</h3><div class="subtitle">SNOW_CERTIFIED.PROFESSIONAL_SERVICES</div></div>
+    </div>
+    <div class="tag-row">
+        <span class="badge badge-amber">266,743 rows</span>
+        <span class="badge badge-red">Read-only</span>
+        <span class="badge badge-purple">Role: SNOW_CERTIFIED_PROFESSIONAL_SERVICES_RO_RL</span>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin: 12px 0;">Source of truth for Salesforce account and opportunity data. This certified Snowflake data share provides the raw opportunity records that are deduplicated into SFDC_ACCOUNTS.</p>
+
+    <div class="flow-diagram">
+        <div class="flow-row">
+            <div class="flow-node">
+                <div class="fn-title">SFDC Opportunities</div>
+                <div class="fn-detail">SNOW_CERTIFIED.PROFESSIONAL_SERVICES</div>
+                <div class="fn-count">266,743 rows</div>
+            </div>
+            <div style="text-align:center; padding: 0 12px;">
+                <div class="flow-arrow">&#x27A1;</div>
+                <div class="flow-label">GROUP BY account</div>
+            </div>
+            <div class="flow-node">
+                <div class="fn-title">SFDC_ACCOUNTS</div>
+                <div class="fn-detail">TEMP.INVESTMENT_GOVERNANCE</div>
+                <div class="fn-count">69,203 rows</div>
+            </div>
+            <div style="text-align:center; padding: 0 12px;">
+                <div class="flow-arrow">&#x27A1;</div>
+                <div class="flow-label">Cache on startup</div>
+            </div>
+            <div class="flow-node">
+                <div class="fn-title">cached_accounts</div>
+                <div class="fn-detail">SQLite (cache.db)</div>
+                <div class="fn-count">Local access</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2>3. Workday (via Snowflake HR Views)</h2>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #EDE9FE; color: #5B21B6;">&#x1F464;</div>
+        <div><h3>SFDC_WORKDAY_USER_VW</h3><div class="subtitle">HR.WORKDAY_BASIC.SFDC_WORKDAY_USER_VW</div></div>
+    </div>
+    <div class="tag-row">
+        <span class="badge badge-purple">Role: TECHNICAL_ACCOUNT_MANAGER</span>
+        <span class="badge badge-green">Active employees only</span>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin: 12px 0;">Provides employee identity, title, manager, and cost center. Used by <code>VW_CURRENT_USER_INFO</code> to identify the current user session.</p>
+    <div class="columns-group">
+        <div class="col-card">
+            <h4>Identity</h4>
+            <ul>
+                <li><code>EMPLOYEE_ID</code> &mdash; Unique employee identifier</li>
+                <li><code>PREFERRED_NAME_FIRST_NAME</code>, <code>PREFERRED_NAME_LAST_NAME</code></li>
+                <li><code>BUSINESS_TITLE</code> &mdash; Current job title</li>
+            </ul>
+        </div>
+        <div class="col-card">
+            <h4>Organization</h4>
+            <ul>
+                <li><code>MANAGER_ID</code>, <code>MANAGER_NAME</code> &mdash; Direct manager</li>
+                <li><code>COST_CENTER_NAME</code> &mdash; Fallback theater</li>
+                <li><code>ACTIVE_STATUS</code> &mdash; Must be 1 (active)</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<h2>4. Snowflake Views</h2>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #DBEAFE; color: #1E40AF;">&#x1F50D;</div>
+        <div><h3>VW_CURRENT_USER_INFO</h3><div class="subtitle">TEMP.INVESTMENT_GOVERNANCE.VW_CURRENT_USER_INFO</div></div>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:14px;">Identifies the current Snowflake session user by joining Workday HR data with the application USERS table.</p>
+
+    <div class="flow-diagram" style="background: linear-gradient(135deg, #1E1B4B 0%, #312E81 100%);">
+        <div class="flow-row">
+            <div class="flow-node" style="border: 2px solid #8B5CF6;">
+                <div class="fn-title">Workday View</div>
+                <div class="fn-detail">HR.WORKDAY_BASIC</div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Name, Title, Manager</div>
+            </div>
+            <div style="text-align:center; padding: 0 12px;">
+                <div class="flow-arrow">&#x2B95;</div>
+                <div class="flow-label">LEFT JOIN on<br>derived username</div>
+            </div>
+            <div class="flow-node" style="border: 2px solid #29B5E8;">
+                <div class="fn-title">USERS Table</div>
+                <div class="fn-detail">INVESTMENT_GOVERNANCE</div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Role, Level, Final Approver</div>
+            </div>
+            <div style="text-align:center; padding: 0 12px;">
+                <div class="flow-arrow">&#x27A1;</div>
+                <div class="flow-label">WHERE matches<br>CURRENT_USER()</div>
+            </div>
+            <div class="flow-node" style="border: 2px solid #10B981;">
+                <div class="fn-title">Current User Info</div>
+                <div class="fn-detail">Merged identity</div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">12 output columns</div>
+            </div>
+        </div>
+    </div>
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;"><strong>Username derivation:</strong> <code>UPPER(CONCAT(LEFT(first_name, 1), REPLACE(last_name, ' ', '')))</code> &mdash; e.g., Tracy LeGrand &rarr; TLEGRAND</p>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #FEE2E2; color: #991B1B;">&#x23F1;</div>
+        <div><h3>VW_DATA_SOURCE_TIMESTAMPS</h3><div class="subtitle">TEMP.INVESTMENT_GOVERNANCE.VW_DATA_SOURCE_TIMESTAMPS</div></div>
+    </div>
+    <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:14px;">Monitors last-modified timestamps across data sources to determine when the local cache needs refreshing.</p>
+    <table>
+        <tr><th>Source Monitored</th><th>Timestamp Column</th></tr>
+        <tr><td>INVESTMENT_REQUESTS</td><td>MAX(UPDATED_AT)</td></tr>
+        <tr><td>USERS</td><td>MAX(CREATED_AT)</td></tr>
+        <tr><td>REQUEST_OPPORTUNITIES</td><td>MAX(LINKED_AT)</td></tr>
+        <tr><td>SUGGESTED_CHANGES</td><td>MAX(SUGGESTED_AT)</td></tr>
+    </table>
+</div>
+
+<h2>5. Local SQLite Cache</h2>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #D1FAE5; color: #065F46;">&#x1F4BE;</div>
+        <div><h3>cache.db <span class="badge badge-green">Local SQLite</span></h3><div class="subtitle">Project root (configurable via config/standard.json)</div></div>
+    </div>
+
+    <table>
+        <tr><th>Cache Table</th><th>Source</th><th>Refresh Trigger</th></tr>
+        <tr><td><code>cached_users</code></td><td>USERS</td><td>Full refresh on startup or timestamp mismatch</td></tr>
+        <tr><td><code>cached_current_user</code></td><td>VW_CURRENT_USER_INFO</td><td>Full refresh on startup</td></tr>
+        <tr><td><code>cached_investment_requests</code></td><td>INVESTMENT_REQUESTS</td><td>Full refresh on startup; background refresh after every write</td></tr>
+        <tr><td><code>cached_accounts</code></td><td>SFDC_ACCOUNTS</td><td>Dropped and recreated on every server start</td></tr>
+        <tr><td><code>cached_opportunities</code></td><td>&mdash;</td><td>Reserved for future use</td></tr>
+        <tr><td><code>cache_metadata</code></td><td>Snowflake timestamps</td><td>Updated after each refresh</td></tr>
+    </table>
+
+    <h3 style="margin-top:20px;">Cache Architecture</h3>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top:12px;">
+        <div class="col-card" style="border-left: 3px solid var(--green);">
+            <h4>Read Pattern</h4>
+            <ul><li>All GET endpoints read from SQLite cache exclusively</li><li>No Snowflake round-trips for reads</li></ul>
+        </div>
+        <div class="col-card" style="border-left: 3px solid var(--snow-blue);">
+            <h4>Write Pattern (Cache-First)</h4>
+            <ul>
+                <li>1. Validate preconditions against cache</li>
+                <li>2. Write changes to SQLite immediately</li>
+                <li>3. Return HTTP success to client</li>
+                <li>4. Background daemon syncs to Snowflake</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<h2>6. Roles &amp; Access</h2>
+
+<div class="role-card">
+    <div class="role-icon" style="background: #DBEAFE; color: #1E40AF;">&#x1F511;</div>
+    <div class="role-info">
+        <h4>TECHNICAL_ACCOUNT_MANAGER</h4>
+        <p>Owns all objects in TEMP.INVESTMENT_GOVERNANCE schema. Full DDL/DML on application tables and views. Reads HR Workday data.</p>
+    </div>
+</div>
+<div class="role-card">
+    <div class="role-icon" style="background: #FEF3C7; color: #92400E;">&#x1F512;</div>
+    <div class="role-info">
+        <h4>SNOW_CERTIFIED_PROFESSIONAL_SERVICES_RO_RL</h4>
+        <p>Read-only access to certified SFDC data. SELECT on SNOW_CERTIFIED.PROFESSIONAL_SERVICES.FCT_SALESFORCE_PROFESSIONAL_SERVICES_OPPORTUNITY.</p>
+    </div>
+</div>
+
+<h2>7. Configuration</h2>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-icon" style="background: #F1F5F9; color: #475569;">&#x2699;</div>
+        <div><h3>config/standard.json</h3><div class="subtitle">Runtime configuration</div></div>
+    </div>
+    <table>
+        <tr><th>Setting</th><th>Value</th><th>Description</th></tr>
+        <tr><td><code>app_name</code></td><td>Investment Governance</td><td>Application display name</td></tr>
+        <tr><td><code>bundle_id</code></td><td>com.snowflake.investmentgovernance</td><td>macOS bundle identifier</td></tr>
+        <tr><td><code>api_port</code></td><td>8770</td><td>Flask API server port</td></tr>
+        <tr><td><code>cache_db</code></td><td>cache.db</td><td>SQLite cache filename</td></tr>
+        <tr><td><code>connection_name</code></td><td>DemoAcct</td><td>Snowflake connection name</td></tr>
+    </table>
+</div>
+
+</div>
+</body>
+</html>

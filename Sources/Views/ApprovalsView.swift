@@ -8,7 +8,9 @@ struct ApprovalsView: View {
     @State private var selectedTheater: String = "All"
     @State private var selectedQuarter: String = "All"
     
-    private let theaters = ["All", "US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]
+    private var theaters: [String] {
+        ["All"] + dataService.sfdcTheaters
+    }
     private let quarters = ["All", "FY27-Q1", "FY27-Q2", "FY27-Q3", "FY27-Q4"]
     
     var pendingApprovals: [InvestmentRequest] {
@@ -226,12 +228,9 @@ struct ApprovalDetailSheet: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 
-                StatusBadge(status: request.status)
-                
                 Spacer()
                 
-                Button("Close") { isPresented = false }
-                    .keyboardShortcut(.escape)
+                StatusBadge(status: request.status)
             }
             .padding()
             
@@ -241,44 +240,58 @@ struct ApprovalDetailSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     GroupBox("Request Details") {
                         VStack(alignment: .leading, spacing: 12) {
-                            DetailRow(label: "Title", value: request.requestTitle)
-                            DetailRow(label: "Account", value: request.accountName ?? "—")
-                            DetailRow(label: "Investment Type", value: request.investmentType ?? "—")
-                            DetailRow(label: "Amount", value: request.formattedAmount)
-                            DetailRow(label: "Quarter", value: request.investmentQuarter ?? "—")
-                            DetailRow(label: "Theater", value: request.theater ?? "—")
-                            DetailRow(label: "Industry Segment", value: request.industrySegment ?? "—")
-                            DetailRow(label: "Submitted By", value: request.createdByName ?? "—")
+                            LabeledField(label: "Title") {
+                                Text(request.requestTitle)
+                            }
+
+                            LabeledField(label: "Account") {
+                                Text(request.accountName ?? "—")
+                            }
+
+                            HStack(spacing: 16) {
+                                LabeledField(label: "Investment Type") {
+                                    Text(request.investmentType ?? "—")
+                                }
+
+                                LabeledField(label: "Amount Requested") {
+                                    Text(request.formattedAmount)
+                                }
+                            }
+
+                            HStack(spacing: 16) {
+                                LabeledField(label: "Quarter") {
+                                    Text(request.investmentQuarter ?? "—")
+                                }
+
+                                LabeledField(label: "Theater") {
+                                    Text(request.theater ?? "—")
+                                }
+
+                                LabeledField(label: "Industry Segment") {
+                                    Text(request.industrySegment ?? "—")
+                                }
+                            }
+
+                            LabeledField(label: "Submitted By") {
+                                Text(request.createdByName ?? "—")
+                            }
                         }
                         .padding()
                     }
                     
                     GroupBox("Business Case") {
                         VStack(alignment: .leading, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Business Justification")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            LabeledField(label: "Business Justification") {
                                 Text(request.businessJustification ?? "—")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             
-                            Divider()
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Expected Outcome")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            LabeledField(label: "Expected Outcome") {
                                 Text(request.expectedOutcome ?? "—")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             
-                            Divider()
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Risk Assessment")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            LabeledField(label: "Risk Assessment") {
                                 Text(request.riskAssessment ?? "—")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -305,28 +318,9 @@ struct ApprovalDetailSheet: View {
                         }
                     }
                     
-                    GroupBox("Approval History") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let dmApprover = request.dmApprovedBy {
-                                ApprovalHistoryRow(level: "DM", approverName: dmApprover, approverTitle: request.dmApprovedByTitle, approvedAt: request.dmApprovedAt, comments: request.dmComments)
-                            }
-                            if let rdApprover = request.rdApprovedBy {
-                                ApprovalHistoryRow(level: "RD", approverName: rdApprover, approverTitle: request.rdApprovedByTitle, approvedAt: request.rdApprovedAt, comments: request.rdComments)
-                            }
-                            if let avpApprover = request.avpApprovedBy {
-                                ApprovalHistoryRow(level: "AVP", approverName: avpApprover, approverTitle: request.avpApprovedByTitle, approvedAt: request.avpApprovedAt, comments: request.avpComments)
-                            }
-                            if let gvpApprover = request.gvpApprovedBy {
-                                ApprovalHistoryRow(level: "GVP/Final", approverName: gvpApprover, approverTitle: request.gvpApprovedByTitle, approvedAt: request.gvpApprovedAt, comments: request.gvpComments)
-                            }
-                            
-                            if request.dmApprovedBy == nil && request.rdApprovedBy == nil && request.avpApprovedBy == nil && request.gvpApprovedBy == nil {
-                                Text("No approvals yet")
-                                    .foregroundColor(.secondary)
-                                    .italic()
-                            }
-                        }
-                        .padding()
+                    GroupBox("Activity Log") {
+                        ApprovalLogContent(request: request)
+                            .padding()
                     }
                     
                     GroupBox("Your Decision") {
@@ -354,8 +348,18 @@ struct ApprovalDetailSheet: View {
             Divider()
             
             HStack {
-                Button("Reject") {
-                    reject()
+                Button("Cancel") { isPresented = false }
+                    .keyboardShortcut(.escape)
+                
+                Button("Send Back for Revision") {
+                    sendBackForRevision()
+                }
+                .buttonStyle(.bordered)
+                .foregroundColor(.orange)
+                .disabled(isProcessing)
+                
+                Button("Deny Request") {
+                    denyRequest()
                 }
                 .buttonStyle(.bordered)
                 .foregroundColor(.red)
@@ -392,10 +396,23 @@ struct ApprovalDetailSheet: View {
         }
     }
     
-    private func reject() {
+    private func sendBackForRevision() {
         isProcessing = true
         errorMessage = nil
-        dataService.rejectRequest(requestId: request.requestId, comments: comments.isEmpty ? nil : comments) { success, error in
+        dataService.sendBackForRevision(requestId: request.requestId, comments: comments.isEmpty ? nil : comments) { success, error in
+            isProcessing = false
+            if success {
+                isPresented = false
+            } else {
+                errorMessage = error
+            }
+        }
+    }
+    
+    private func denyRequest() {
+        isProcessing = true
+        errorMessage = nil
+        dataService.denyRequest(requestId: request.requestId, comments: comments.isEmpty ? nil : comments) { success, error in
             isProcessing = false
             if success {
                 isPresented = false
@@ -406,67 +423,4 @@ struct ApprovalDetailSheet: View {
     }
 }
 
-struct ApprovalHistoryRow: View {
-    let level: String
-    let approverName: String
-    let approverTitle: String?
-    let approvedAt: Date?
-    let comments: String?
-    
-    private var formattedDate: String {
-        guard let date = approvedAt else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                
-                Text("\(level) Approved")
-                    .fontWeight(.medium)
-                
-                Spacer()
-                
-                if approvedAt != nil {
-                    Text(formattedDate)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            HStack(alignment: .top, spacing: 4) {
-                Text(approverName)
-                    .font(.subheadline)
-                
-                if let title = approverTitle, !title.isEmpty {
-                    Text("•")
-                        .foregroundColor(.secondary)
-                    Text(title)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.leading, 28)
-            
-            if let comment = comments, !comment.isEmpty {
-                HStack(alignment: .top) {
-                    Image(systemName: "text.quote")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(comment)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .italic()
-                }
-                .padding(.leading, 28)
-                .padding(.top, 2)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
+
