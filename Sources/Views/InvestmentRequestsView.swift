@@ -64,17 +64,17 @@ struct InvestmentRequestsView: View {
         }
     }
     
-    private var theaters: [String] {
-        ["All"] + dataService.sfdcTheaters
-    }
+    private let theaters = TheaterMapping.allTheaters
     
-    private var availableIndustries: [String] {
+    private let portfoliosByTheater = TheaterMapping.portfoliosByTheater
+    
+    private var availablePortfolios: [String] {
         if selectedTheater == "All" {
-            return dataService.sfdcIndustries
+            return portfoliosByTheater.values.flatMap { $0 }.sorted()
         }
-        return dataService.sfdcIndustriesByTheater[selectedTheater] ?? []
+        return portfoliosByTheater[selectedTheater] ?? []
     }
-    private let statuses = ["All", "DRAFT", "SUBMITTED", "IN_REVIEW", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED", "FINAL_APPROVED", "REJECTED"]
+    private let statuses = ["All", "DRAFT", "SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED", "FINAL_APPROVED", "REJECTED"]
     
     var quartersGroupedByYear: [(year: String, quarters: [String])] {
         let (currentFY, currentQ) = currentFiscalYearAndQuarter
@@ -99,7 +99,7 @@ struct InvestmentRequestsView: View {
                 request.requestTitle.localizedCaseInsensitiveContains(searchText) ||
                 (request.accountName?.localizedCaseInsensitiveContains(searchText) ?? false)
             
-            let matchesTheater = selectedTheater == "All" || request.theater == selectedTheater
+            let matchesTheater = selectedTheater == "All" || TheaterMapping.dbCodes(forDisplayName: selectedTheater).contains(request.theater ?? "")
             let matchesIndustry = selectedIndustries.isEmpty || selectedIndustries.contains(request.industrySegment ?? "")
             let matchesQuarter: Bool
             if selectedQuarters.isEmpty {
@@ -112,38 +112,30 @@ struct InvestmentRequestsView: View {
                     request.investmentQuarter?.hasPrefix(year) == true
                 }
             }
-            let matchesStatus: Bool
-            if selectedStatus == "All" {
-                matchesStatus = true
-            } else if selectedStatus == "IN_REVIEW" {
-                matchesStatus = ["SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED"].contains(request.status)
+            let matchesStatus = selectedStatus == "All" || request.status == selectedStatus
+            
+            let matchesPendingMyApproval: Bool
+            if filterPendingMyApproval {
+                let currentUserName = dataService.currentUser?.displayName
+                let isPending = ["SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED"].contains(request.status)
+                matchesPendingMyApproval = isPending && request.nextApproverName == currentUserName
             } else {
-                matchesStatus = request.status == selectedStatus
+                matchesPendingMyApproval = true
             }
             
-            let matchesPersonalFilters: Bool
-            if filterPendingMyApproval || filterMyRequests {
+            let matchesMyRequests: Bool
+            if filterMyRequests {
                 let currentUserName = dataService.currentUser?.displayName
                 let currentUsername = dataService.currentUser?.snowflakeUsername
-                let currentEmployeeId = dataService.currentUser?.employeeId
-                let isPending = ["SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED"].contains(request.status)
-                let isMyApproval = isPending && request.nextApproverName == currentUserName
-                let isCreator = request.createdByName == currentUserName ||
-                    request.createdBy == currentUsername ||
-                    (currentEmployeeId != nil && (request.createdByEmployeeId == currentEmployeeId || request.onBehalfOfEmployeeId == currentEmployeeId))
-
-                if filterPendingMyApproval && filterMyRequests {
-                    matchesPersonalFilters = isCreator || isMyApproval
-                } else if filterPendingMyApproval {
-                    matchesPersonalFilters = isMyApproval
-                } else {
-                    matchesPersonalFilters = isCreator
-                }
+                let teamIds = dataService.teamEmployeeIds
+                let isMyRequest = request.createdByName == currentUserName || request.createdBy == currentUsername
+                let isTeamRequest = request.createdByEmployeeId.map { teamIds.contains($0) } ?? false
+                matchesMyRequests = isMyRequest || isTeamRequest
             } else {
-                matchesPersonalFilters = true
+                matchesMyRequests = true
             }
             
-            return matchesSearch && matchesTheater && matchesIndustry && matchesQuarter && matchesStatus && matchesPersonalFilters
+            return matchesSearch && matchesTheater && matchesIndustry && matchesQuarter && matchesStatus && matchesPendingMyApproval && matchesMyRequests
         }
         
         return filtered.sorted { a, b in
@@ -203,16 +195,16 @@ struct InvestmentRequestsView: View {
                     showIndustryPicker.toggle()
                 } label: {
                     HStack {
-                        Text(selectedIndustries.isEmpty ? "All Industries" : "\(selectedIndustries.count) Selected")
+                        Text(selectedIndustries.isEmpty ? "All Portfolios" : "\(selectedIndustries.count) Selected")
                         Image(systemName: "chevron.down")
                     }
                     .frame(width: 140)
                 }
-                .disabled(availableIndustries.isEmpty)
+                .disabled(availablePortfolios.isEmpty)
                 .popover(isPresented: $showIndustryPicker, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Select Industries")
+                            Text("Select Portfolios")
                                 .font(.headline)
                             Spacer()
                             Button("Clear") {
@@ -231,15 +223,15 @@ struct InvestmentRequestsView: View {
                         
                         VStack(alignment: .leading, spacing: 8) {
                             Button {
-                                if selectedIndustries.count == availableIndustries.count {
+                                if selectedIndustries.count == availablePortfolios.count {
                                     selectedIndustries.removeAll()
                                 } else {
-                                    selectedIndustries = Set(availableIndustries)
+                                    selectedIndustries = Set(availablePortfolios)
                                 }
                             } label: {
                                 HStack {
-                                    Image(systemName: selectedIndustries.count == availableIndustries.count ? "checkmark.square.fill" : "square")
-                                        .foregroundColor(selectedIndustries.count == availableIndustries.count ? .blue : .secondary)
+                                    Image(systemName: selectedIndustries.count == availablePortfolios.count ? "checkmark.square.fill" : "square")
+                                        .foregroundColor(selectedIndustries.count == availablePortfolios.count ? .blue : .secondary)
                                     Text("All")
                                         .fontWeight(.semibold)
                                         .foregroundColor(.primary)
@@ -248,7 +240,7 @@ struct InvestmentRequestsView: View {
                             }
                             .buttonStyle(.plain)
                             
-                            ForEach(availableIndustries, id: \.self) { industry in
+                            ForEach(availablePortfolios, id: \.self) { industry in
                                 Button {
                                     if selectedIndustries.contains(industry) {
                                         selectedIndustries.remove(industry)
@@ -506,7 +498,7 @@ struct InvestmentRequestsView: View {
             }
         }
         .sheet(isPresented: $showingNewRequest) {
-            RequestFormView(isPresented: $showingNewRequest)
+            NewRequestView(isPresented: $showingNewRequest)
         }
         .onChange(of: navigationState.showingNewRequest) { _, newValue in
             if newValue {
@@ -525,21 +517,11 @@ struct InvestmentRequestsView: View {
         .onChange(of: navigationState.navigationTrigger) { _, _ in
             applyPassedFiltersOrInitialize()
         }
-        .onChange(of: selectedTheater) { _, newTheater in
-            if newTheater == "All" {
-                selectedIndustries.removeAll()
-            } else if availableIndustries.isEmpty {
+        .onChange(of: selectedTheater) { _, _ in
+            if availablePortfolios.isEmpty {
                 selectedIndustries.removeAll()
             } else {
-                selectedIndustries = selectedIndustries.filter { availableIndustries.contains($0) }
-            }
-        }
-        .onChange(of: filterPendingMyApproval) { _, isOn in
-            if isOn {
-                selectedQuarters = []
-                selectedTheater = "All"
-                selectedIndustries = []
-                selectedStatus = "All"
+                selectedIndustries = selectedIndustries.filter { availablePortfolios.contains($0) }
             }
         }
     }
@@ -592,7 +574,6 @@ struct InvestmentRequestsView: View {
         case "All": return "All"
         case "DRAFT": return "Draft"
         case "SUBMITTED": return "Submitted"
-        case "IN_REVIEW": return "Pending Approval"
         case "DM_APPROVED": return "DM Approved"
         case "RD_APPROVED": return "RD Approved"
         case "AVP_APPROVED": return "AVP Approved"
@@ -611,13 +592,95 @@ struct InvestmentRequestsView: View {
     }
 }
 
-extension DateFormatter {
-    static let shortDateTime: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
+struct ApprovalHistoryRow: View {
+    let level: String
+    let approverName: String
+    let approverTitle: String?
+    let approvedAt: Date?
+    let comments: String?
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("\(level) Approval")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                if let date = approvedAt {
+                    Text(date, style: .date)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Text("\(approverName)\(approverTitle.map { " (\($0))" } ?? "")")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            if let comments = comments, !comments.isEmpty {
+                Text(comments)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .italic()
+            }
+        }
+    }
+}
+
+struct ApprovalLogContent: View {
+    let request: InvestmentRequest
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let createdByName = request.createdByName {
+                logRow(status: "Created", name: createdByName, date: request.createdAt)
+            }
+            if let submittedByName = request.submittedByName {
+                logRow(status: "Submitted", name: submittedByName, date: request.submittedAt, comment: request.submittedComment)
+            }
+            if let dm = request.dmApprovedBy {
+                logRow(status: "DM Approved", name: dm, title: request.dmApprovedByTitle, date: request.dmApprovedAt, comment: request.dmComments)
+            }
+            if let rd = request.rdApprovedBy {
+                logRow(status: "RD Approved", name: rd, title: request.rdApprovedByTitle, date: request.rdApprovedAt, comment: request.rdComments)
+            }
+            if let avp = request.avpApprovedBy {
+                logRow(status: "AVP Approved", name: avp, title: request.avpApprovedByTitle, date: request.avpApprovedAt, comment: request.avpComments)
+            }
+            if let gvp = request.gvpApprovedBy {
+                logRow(status: "Final Approved", name: gvp, title: request.gvpApprovedByTitle, date: request.gvpApprovedAt, comment: request.gvpComments)
+            }
+            if let withdrawnBy = request.withdrawnByName {
+                logRow(status: "Withdrawn", name: withdrawnBy, date: request.withdrawnAt, comment: request.withdrawnComment)
+            }
+            if let nextApprover = request.nextApproverName, request.isSubmitted {
+                logRow(status: "Pending", name: nextApprover, title: request.nextApproverTitle)
+            }
+        }
+    }
+    
+    private func logRow(status: String, name: String, title: String? = nil, date: Date? = nil, comment: String? = nil) -> some View {
+        HStack(alignment: .top) {
+            Text(status)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .frame(width: 90, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(name)\(title.map { " (\($0))" } ?? "")")
+                    .font(.caption)
+                if let comment = comment, !comment.isEmpty {
+                    Text(comment)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .italic()
+                }
+            }
+            Spacer()
+            if let date = date {
+                Text(date, style: .date)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
 }
 struct RequestTableRow: View {
     let request: InvestmentRequest
@@ -780,11 +843,7 @@ struct RequestTableRow: View {
             showingDetail = true
         }
         .sheet(isPresented: $showingDetail) {
-            if request.isEditable {
-                RequestFormView(existingRequest: request, isPresented: $showingDetail)
-            } else {
-                RequestDetailView(request: request, isPresented: $showingDetail, mode: .view)
-            }
+            RequestDetailView(request: request, isPresented: $showingDetail, mode: request.isEditable ? .edit : .view)
         }
         .sheet(isPresented: $showingApprovalSheet) {
             ApprovalDetailSheet(request: request, isPresented: $showingApprovalSheet)
@@ -803,272 +862,32 @@ struct RequestTableRow: View {
     }
 }
 
-class RichTextState: ObservableObject {
-    weak var coordinator: RichTextEditor.Coordinator?
-}
-
-struct RichTextEditor: NSViewRepresentable {
-    @Binding var text: String
-    var placeholder: String = ""
-    @Binding var isFocused: Bool
-    var state: RichTextState?
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        let textView = NSTextView()
-
-        textView.isRichText = true
-        textView.allowsUndo = true
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.font = NSFont.systemFont(ofSize: 13)
-        textView.textContainerInset = NSSize(width: 4, height: 4)
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.delegate = context.coordinator
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.textContainer?.widthTracksTextView = true
-        textView.autoresizingMask = [.width]
-
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
-
-        context.coordinator.textView = textView
-        state?.coordinator = context.coordinator
-
-        if !text.isEmpty {
-            textView.string = text
-        }
-
-        return scrollView
-    }
-
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView else { return }
-        if textView.string != text && !context.coordinator.isEditing {
-            textView.string = text
-        }
-        state?.coordinator = context.coordinator
-    }
-
-    class Coordinator: NSObject, NSTextViewDelegate {
-        var parent: RichTextEditor
-        weak var textView: NSTextView?
-        var isEditing = false
-
-        init(_ parent: RichTextEditor) {
-            self.parent = parent
-        }
-
-        func textDidChange(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView else { return }
-            isEditing = true
-            parent.text = tv.string
-            isEditing = false
-        }
-
-        func textDidBeginEditing(_ notification: Notification) {
-            parent.isFocused = true
-        }
-
-        func textDidEndEditing(_ notification: Notification) {
-            parent.isFocused = false
-        }
-
-        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            if commandSelector == #selector(NSResponder.insertTab(_:)) {
-                textView.window?.selectNextKeyView(nil)
-                return true
-            }
-            if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
-                textView.window?.selectPreviousKeyView(nil)
-                return true
-            }
-            return false
-        }
-
-        func toggleBold() {
-            guard let tv = textView else { return }
-            let range = tv.selectedRange()
-            guard range.length > 0 else { return }
-            let storage = tv.textStorage!
-            var hasBold = false
-            storage.enumerateAttribute(.font, in: range) { value, _, _ in
-                if let font = value as? NSFont {
-                    hasBold = hasBold || font.fontDescriptor.symbolicTraits.contains(.bold)
-                }
-            }
-            storage.beginEditing()
-            storage.enumerateAttribute(.font, in: range) { value, attrRange, _ in
-                if let font = value as? NSFont {
-                    let newFont: NSFont
-                    if hasBold {
-                        newFont = NSFontManager.shared.convert(font, toNotHaveTrait: .boldFontMask)
-                    } else {
-                        newFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-                    }
-                    storage.addAttribute(.font, value: newFont, range: attrRange)
-                }
-            }
-            storage.endEditing()
-            parent.text = tv.string
-        }
-
-        func toggleItalic() {
-            guard let tv = textView else { return }
-            let range = tv.selectedRange()
-            guard range.length > 0 else { return }
-            let storage = tv.textStorage!
-            var hasItalic = false
-            storage.enumerateAttribute(.font, in: range) { value, _, _ in
-                if let font = value as? NSFont {
-                    hasItalic = hasItalic || font.fontDescriptor.symbolicTraits.contains(.italic)
-                }
-            }
-            storage.beginEditing()
-            storage.enumerateAttribute(.font, in: range) { value, attrRange, _ in
-                if let font = value as? NSFont {
-                    let newFont: NSFont
-                    if hasItalic {
-                        newFont = NSFontManager.shared.convert(font, toNotHaveTrait: .italicFontMask)
-                    } else {
-                        newFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
-                    }
-                    storage.addAttribute(.font, value: newFont, range: attrRange)
-                }
-            }
-            storage.endEditing()
-            parent.text = tv.string
-        }
-
-        func toggleUnderline() {
-            guard let tv = textView else { return }
-            let range = tv.selectedRange()
-            guard range.length > 0 else { return }
-            let storage = tv.textStorage!
-            var hasUnderline = false
-            storage.enumerateAttribute(.underlineStyle, in: range) { value, _, _ in
-                if let style = value as? Int, style != 0 { hasUnderline = true }
-            }
-            storage.beginEditing()
-            if hasUnderline {
-                storage.removeAttribute(.underlineStyle, range: range)
-            } else {
-                storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
-            }
-            storage.endEditing()
-            parent.text = tv.string
-        }
-
-        func insertBullet() {
-            guard let tv = textView else { return }
-            let range = tv.selectedRange()
-            let text = tv.string as NSString
-            let lineRange = text.lineRange(for: range)
-            let lineText = text.substring(with: lineRange)
-
-            tv.textStorage?.beginEditing()
-            if lineText.hasPrefix("• ") {
-                tv.textStorage?.replaceCharacters(in: NSRange(location: lineRange.location, length: 2), with: "")
-            } else {
-                tv.textStorage?.replaceCharacters(in: NSRange(location: lineRange.location, length: 0), with: "• ")
-            }
-            tv.textStorage?.endEditing()
-            parent.text = tv.string
-        }
-    }
-}
-
-struct FormattingToolbar: View {
-    @ObservedObject var state: RichTextState
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Button(action: { state.coordinator?.toggleBold() }) {
-                Image(systemName: "bold")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Bold")
-
-            Button(action: { state.coordinator?.toggleItalic() }) {
-                Image(systemName: "italic")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Italic")
-
-            Button(action: { state.coordinator?.toggleUnderline() }) {
-                Image(systemName: "underline")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Underline")
-
-            Button(action: { state.coordinator?.insertBullet() }) {
-                Image(systemName: "list.bullet")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Bullet List")
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(4)
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
-    }
-}
-
-struct RequestFormView: View {
-    var existingRequest: InvestmentRequest?
+struct NewRequestView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject var dataService: DataService
-
+    
     @State private var title = ""
     @State private var selectedAccount: SFDCAccount?
     @State private var accountSearchText = ""
     @State private var searchResults: [SFDCAccount] = []
-    @State private var totalMatchCount: Int = 0
     @State private var isSearching = false
     @State private var investmentType = ""
     @State private var amount = ""
-    @State private var amountEditing = false
     @State private var quarter = ""
     @State private var theater = "US Majors"
     @State private var industrySegment = ""
-    @State private var salesforceURL = ""
-    @State private var expectedROI = "10x"
     @State private var justification = ""
     @State private var expectedOutcome = ""
     @State private var riskAssessment = ""
     @State private var isSaving = false
-    @State private var isSubmitting = false
     @State private var errorMessage: String?
-    @State private var comment = ""
-
-    @State private var justificationFocused = false
-    @State private var outcomeFocused = false
-    @State private var riskFocused = false
-
-    @StateObject private var justificationState = RichTextState()
-    @StateObject private var outcomeState = RichTextState()
-    @StateObject private var riskState = RichTextState()
-
-    private var isEditMode: Bool { existingRequest != nil }
-
+    
     private var defaultQuarter: String {
         let now = Date()
         let calendar = Calendar.current
         let month = calendar.component(.month, from: now)
         let year = calendar.component(.year, from: now)
-
+        
         let (fy, q): (Int, Int)
         switch month {
         case 2, 3, 4: (fy, q) = (year + 1, 1)
@@ -1080,66 +899,59 @@ struct RequestFormView: View {
         }
         return "FY\(fy)-Q\(q)"
     }
-
+    
     private let investmentTypes = ["Professional Services", "Customer Success", "Training", "Support", "Partnership", "Other"]
-    private let roiOptions = ["5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x", "13x", "14x", "15x", "16x", "17x", "18x", "19x", "20x", "> 20x"]
-
-    private var availableIndustries: [String] {
-        dataService.sfdcIndustriesByTheater[theater] ?? dataService.sfdcIndustries
-    }
-
+    private let theaters = ["US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]
+    
     private var availableQuarters: [String] {
         let now = Date()
         let calendar = Calendar.current
         let month = calendar.component(.month, from: now)
         let year = calendar.component(.year, from: now)
-
+        
         let (currentFY, currentQ): (Int, Int)
         switch month {
-        case 2, 3, 4: (currentFY, currentQ) = (year + 1, 1)
-        case 5, 6, 7: (currentFY, currentQ) = (year + 1, 2)
-        case 8, 9, 10: (currentFY, currentQ) = (year + 1, 3)
-        case 11, 12: (currentFY, currentQ) = (year + 2, 4)
-        case 1: (currentFY, currentQ) = (year + 1, 4)
-        default: (currentFY, currentQ) = (year + 1, 1)
+        case 2, 3, 4:
+            (currentFY, currentQ) = (year + 1, 1)
+        case 5, 6, 7:
+            (currentFY, currentQ) = (year + 1, 2)
+        case 8, 9, 10:
+            (currentFY, currentQ) = (year + 1, 3)
+        case 11, 12:
+            (currentFY, currentQ) = (year + 2, 4)
+        case 1:
+            (currentFY, currentQ) = (year + 1, 4)
+        default:
+            (currentFY, currentQ) = (year + 1, 1)
         }
-
+        
         let previousFY = currentFY - 1
         var quarters = (1...4).map { "FY\(previousFY)-Q\($0)" } + (1...4).map { "FY\(currentFY)-Q\($0)" }
-
+        
         if currentQ == 4 {
             let nextFY = currentFY + 1
             quarters += ["FY\(nextFY)-Q1", "FY\(nextFY)-Q2"]
         }
-
+        
         return quarters
     }
-
-    private func formatAmountDisplay(_ raw: String) -> String {
-        let cleaned = raw.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
-        guard let value = Double(cleaned), value > 0 else { return raw }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencySymbol = "$"
-        formatter.maximumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: value)) ?? raw
-    }
-
+    
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(isEditMode ? "Edit Investment Request" : "New Investment Request")
+                Text("New Investment Request")
                     .font(.title2)
                     .fontWeight(.bold)
+                
                 Spacer()
-                if let req = existingRequest {
-                    StatusBadge(status: req.status)
-                }
+                
+                Button("Cancel") { isPresented = false }
+                    .keyboardShortcut(.escape)
             }
             .padding()
-
+            
             Divider()
-
+            
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     GroupBox("Request Details") {
@@ -1148,7 +960,7 @@ struct RequestFormView: View {
                                 TextField("Enter request title", text: $title)
                                     .textFieldStyle(.roundedBorder)
                             }
-
+                            
                             LabeledField(label: "Account") {
                                 VStack(alignment: .leading, spacing: 4) {
                                     if let account = selectedAccount {
@@ -1157,7 +969,7 @@ struct RequestFormView: View {
                                                 .padding(8)
                                                 .background(Color.blue.opacity(0.1))
                                                 .cornerRadius(4)
-
+                                            
                                             Button(action: { selectedAccount = nil }) {
                                                 Image(systemName: "xmark.circle.fill")
                                                     .foregroundColor(.secondary)
@@ -1165,79 +977,44 @@ struct RequestFormView: View {
                                             .buttonStyle(.borderless)
                                         }
                                     } else {
-                                        TextField("Search or type account name...", text: $accountSearchText)
+                                        TextField("Search accounts...", text: $accountSearchText)
                                             .textFieldStyle(.roundedBorder)
                                             .onChange(of: accountSearchText) { _, newValue in
                                                 searchAccounts(query: newValue)
                                             }
-
+                                        
                                         if !searchResults.isEmpty {
-                                            ScrollView {
-                                                VStack(alignment: .leading, spacing: 0) {
-                                                    ForEach(searchResults.prefix(20)) { account in
-                                                        Button(action: {
-                                                            selectedAccount = account
-                                                            accountSearchText = ""
-                                                            searchResults = []
-                                                            if let acctTheater = account.theater {
-                                                                theater = acctTheater
-                                                            }
-                                                            if let segment = account.industrySegment {
-                                                                industrySegment = segment
-                                                            }
-                                                        }) {
-                                                            HStack {
-                                                                Text(account.accountName)
-                                                                Spacer()
-                                                                if let seg = account.industrySegment {
-                                                                    Text(seg)
-                                                                        .font(.caption2)
-                                                                        .foregroundColor(.secondary)
-                                                                }
-                                                                if let t = account.theater {
-                                                                    Text(t)
-                                                                        .font(.caption)
-                                                                        .foregroundColor(.secondary)
-                                                                }
-                                                            }
-                                                            .padding(8)
-                                                            .contentShape(Rectangle())
+                                            VStack(alignment: .leading, spacing: 0) {
+                                                ForEach(searchResults.prefix(5)) { account in
+                                                    Button(action: {
+                                                        selectedAccount = account
+                                                        accountSearchText = ""
+                                                        searchResults = []
+                                                        if let acctTheater = account.theater {
+                                                            theater = acctTheater
                                                         }
-                                                        .buttonStyle(.plain)
-
-                                                        if account.id != searchResults.prefix(20).last?.id {
-                                                            Divider()
+                                                        if let segment = account.industrySegment {
+                                                            industrySegment = segment
                                                         }
+                                                    }) {
+                                                        HStack {
+                                                            Text(account.accountName)
+                                                            Spacer()
+                                                            if let t = account.theater {
+                                                                Text(t)
+                                                                    .font(.caption)
+                                                                    .foregroundColor(.secondary)
+                                                            }
+                                                        }
+                                                        .padding(8)
                                                     }
-                                                    if totalMatchCount > searchResults.prefix(20).count {
+                                                    .buttonStyle(.plain)
+                                                    
+                                                    if account.id != searchResults.prefix(5).last?.id {
                                                         Divider()
-                                                        Text("\(totalMatchCount - searchResults.prefix(20).count) more matches — refine your search")
-                                                            .font(.caption)
-                                                            .foregroundColor(.secondary)
-                                                            .italic()
-                                                            .padding(8)
-                                                            .frame(maxWidth: .infinity, alignment: .center)
                                                     }
                                                 }
                                             }
-                                            .frame(maxHeight: 300)
-                                            .background(Color(NSColor.controlBackgroundColor))
-                                            .cornerRadius(4)
-                                            .shadow(radius: 2)
-                                        } else if accountSearchText.count >= 2 && !isSearching {
-                                            Button(action: {
-                                                selectedAccount = SFDCAccount(accountId: "", accountName: accountSearchText.trimmingCharacters(in: .whitespaces), theater: nil, industrySegment: nil)
-                                                accountSearchText = ""
-                                            }) {
-                                                HStack {
-                                                    Image(systemName: "plus.circle")
-                                                    Text("Use \"\(accountSearchText)\" as account name")
-                                                        .foregroundColor(.primary)
-                                                }
-                                                .padding(8)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                            }
-                                            .buttonStyle(.plain)
                                             .background(Color(NSColor.controlBackgroundColor))
                                             .cornerRadius(4)
                                             .shadow(radius: 2)
@@ -1245,7 +1022,7 @@ struct RequestFormView: View {
                                     }
                                 }
                             }
-
+                            
                             HStack(spacing: 16) {
                                 LabeledField(label: "Investment Type") {
                                     Picker("", selection: $investmentType) {
@@ -1254,27 +1031,14 @@ struct RequestFormView: View {
                                     }
                                     .labelsHidden()
                                 }
-
-                                LabeledField(label: "Amount Requested") {
-                                    TextField("$0", text: $amount, onEditingChanged: { editing in
-                                        amountEditing = editing
-                                        if !editing {
-                                            amount = formatAmountDisplay(amount)
-                                        }
-                                    })
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 140)
-                                }
-
-                                LabeledField(label: "Expected ROI") {
-                                    Picker("", selection: $expectedROI) {
-                                        ForEach(roiOptions, id: \.self) { Text($0) }
-                                    }
-                                    .labelsHidden()
-                                    .frame(width: 80)
+                                
+                                LabeledField(label: "Amount") {
+                                    TextField("$0", text: $amount)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 120)
                                 }
                             }
-
+                            
                             HStack(spacing: 16) {
                                 LabeledField(label: "Quarter") {
                                     Picker("", selection: $quarter) {
@@ -1282,234 +1046,113 @@ struct RequestFormView: View {
                                     }
                                     .labelsHidden()
                                 }
-
+                                
                                 LabeledField(label: "Theater") {
                                     Picker("", selection: $theater) {
-                                        Text("Select...").tag("")
-                                        ForEach(dataService.sfdcTheaters, id: \.self) { Text($0) }
+                                        ForEach(theaters, id: \.self) { Text($0) }
                                     }
                                     .labelsHidden()
                                 }
-
+                                
                                 LabeledField(label: "Industry Segment") {
-                                    Picker("", selection: $industrySegment) {
-                                        Text("Select...").tag("")
-                                        ForEach(availableIndustries, id: \.self) { Text($0) }
-                                    }
-                                    .labelsHidden()
+                                    TextField("Enter segment", text: $industrySegment)
+                                        .textFieldStyle(.roundedBorder)
                                 }
-                            }
-
-                            LabeledField(label: "Salesforce Record URL") {
-                                TextField("https://snowflake.my.salesforce.com/...", text: $salesforceURL)
-                                    .textFieldStyle(.roundedBorder)
                             }
                         }
                         .padding()
                     }
-
+                    
                     GroupBox("Business Case") {
-                        VStack(alignment: .leading, spacing: 16) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text("Business Justification")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    if justificationFocused {
-                                        FormattingToolbar(state: justificationState)
-                                    }
-                                }
-                                RichTextEditor(text: $justification, placeholder: "Enter justification...", isFocused: $justificationFocused, state: justificationState)
+                        VStack(alignment: .leading, spacing: 12) {
+                            LabeledField(label: "Business Justification") {
+                                TextEditor(text: $justification)
                                     .frame(height: 80)
+                                    .border(Color.secondary.opacity(0.3))
                             }
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text("Expected Outcome")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    if outcomeFocused {
-                                        FormattingToolbar(state: outcomeState)
-                                    }
-                                }
-                                RichTextEditor(text: $expectedOutcome, placeholder: "Enter expected outcome...", isFocused: $outcomeFocused, state: outcomeState)
+                            
+                            LabeledField(label: "Expected Outcome") {
+                                TextEditor(text: $expectedOutcome)
                                     .frame(height: 80)
+                                    .border(Color.secondary.opacity(0.3))
                             }
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text("Risk Assessment")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    if riskFocused {
-                                        FormattingToolbar(state: riskState)
-                                    }
-                                }
-                                RichTextEditor(text: $riskAssessment, placeholder: "Enter risk assessment...", isFocused: $riskFocused, state: riskState)
+                            
+                            LabeledField(label: "Risk Assessment") {
+                                TextEditor(text: $riskAssessment)
                                     .frame(height: 80)
+                                    .border(Color.secondary.opacity(0.3))
                             }
                         }
                         .padding()
                     }
-
+                    
                     if let error = errorMessage {
                         Text(error)
                             .foregroundColor(.red)
                             .font(.caption)
                     }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Comment (optional)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        TextField("Add a comment...", text: $comment)
-                            .textFieldStyle(.roundedBorder)
-                    }
                 }
                 .padding()
             }
-
+            
             Divider()
-
+            
             HStack {
-                Button("Cancel") { isPresented = false }
-                    .keyboardShortcut(.escape)
-
                 Spacer()
-
+                
                 Button("Save as Draft") {
-                    saveRequest(submit: false)
+                    saveRequest()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.yellow)
-                .foregroundColor(.black)
-                .disabled(title.isEmpty || isSaving || isSubmitting)
-
-                Button("Submit") {
-                    saveRequest(submit: true)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(title.isEmpty || isSaving || isSubmitting)
+                .disabled(title.isEmpty || isSaving)
             }
             .padding()
         }
-        .frame(width: 750, height: 780)
+        .frame(width: 700, height: 700)
         .onAppear {
-            if let req = existingRequest {
-                title = req.requestTitle
-                if let name = req.accountName {
-                    selectedAccount = SFDCAccount(accountId: req.accountId ?? "", accountName: name, theater: req.theater, industrySegment: req.industrySegment)
-                }
-                investmentType = req.investmentType ?? ""
-                if let amt = req.requestedAmount {
-                    let formatter = NumberFormatter()
-                    formatter.numberStyle = .currency
-                    formatter.currencySymbol = "$"
-                    formatter.maximumFractionDigits = 0
-                    amount = formatter.string(from: NSNumber(value: amt)) ?? "\(amt)"
-                }
-                quarter = req.investmentQuarter ?? ""
-                theater = req.theater ?? "US Majors"
-                industrySegment = req.industrySegment ?? ""
-                salesforceURL = req.sfdcOpportunityLink ?? ""
-                expectedROI = req.expectedRoi ?? "10x"
-                justification = req.businessJustification ?? ""
-                expectedOutcome = req.expectedOutcome ?? ""
-                riskAssessment = req.riskAssessment ?? ""
-            } else {
-                if quarter.isEmpty {
-                    quarter = defaultQuarter
-                }
-            }
-        }
-        .onChange(of: theater) { _, _ in
-            if !availableIndustries.contains(industrySegment) {
-                industrySegment = ""
+            if quarter.isEmpty {
+                quarter = defaultQuarter
             }
         }
     }
-
+    
     private func searchAccounts(query: String) {
         guard query.count >= 2 else {
             searchResults = []
-            totalMatchCount = 0
             return
         }
-
+        
         isSearching = true
-        dataService.searchAccounts(query: query) { accounts, total in
+        dataService.searchAccounts(query: query) { accounts, _ in
             isSearching = false
             searchResults = accounts
-            totalMatchCount = total
         }
     }
-
-    private func saveRequest(submit: Bool) {
-        if submit {
-            isSubmitting = true
-        } else {
-            isSaving = true
-        }
+    
+    private func saveRequest() {
+        isSaving = true
         errorMessage = nil
-
+        
         let amountValue = Double(amount.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: ""))
-
-        if let req = existingRequest {
-            dataService.updateRequest(
-                requestId: req.requestId,
-                title: title,
-                accountId: selectedAccount?.accountId,
-                accountName: selectedAccount?.accountName,
-                investmentType: investmentType.isEmpty ? nil : investmentType,
-                amount: amountValue,
-                quarter: quarter,
-                justification: justification.isEmpty ? nil : justification,
-                expectedOutcome: expectedOutcome.isEmpty ? nil : expectedOutcome,
-                riskAssessment: riskAssessment.isEmpty ? nil : riskAssessment,
-                theater: theater,
-                industrySegment: industrySegment.isEmpty ? nil : industrySegment,
-                salesforceURL: salesforceURL.isEmpty ? nil : salesforceURL,
-                expectedROI: expectedROI.isEmpty ? nil : expectedROI,
-                draftComment: (!submit && !comment.isEmpty) ? comment : nil,
-                autoSubmit: submit,
-                submitComment: submit ? (comment.isEmpty ? nil : comment) : nil
-            ) { success in
-                isSaving = false
-                isSubmitting = false
-                if success {
-                    isPresented = false
-                } else {
-                    errorMessage = submit ? "Failed to update and submit request." : "Failed to update request. Please try again."
-                }
-            }
-        } else {
-            dataService.createRequest(
-                title: title,
-                accountId: selectedAccount?.accountId,
-                accountName: selectedAccount?.accountName,
-                investmentType: investmentType.isEmpty ? nil : investmentType,
-                amount: amountValue,
-                quarter: quarter,
-                justification: justification.isEmpty ? nil : justification,
-                expectedOutcome: expectedOutcome.isEmpty ? nil : expectedOutcome,
-                riskAssessment: riskAssessment.isEmpty ? nil : riskAssessment,
-                theater: theater,
-                industrySegment: industrySegment.isEmpty ? nil : industrySegment,
-                salesforceURL: salesforceURL.isEmpty ? nil : salesforceURL,
-                expectedROI: expectedROI.isEmpty ? nil : expectedROI,
-                autoSubmit: submit,
-                submitComment: submit ? (comment.isEmpty ? nil : comment) : nil
-            ) { success, requestId in
-                isSaving = false
-                isSubmitting = false
-                if success {
-                    isPresented = false
-                } else {
-                    errorMessage = submit ? "Failed to create and submit request." : "Failed to create request. Please try again."
-                }
+        
+        dataService.createRequest(
+            title: title,
+            accountId: selectedAccount?.accountId,
+            accountName: selectedAccount?.accountName,
+            investmentType: investmentType.isEmpty ? nil : investmentType,
+            amount: amountValue,
+            quarter: quarter,
+            justification: justification.isEmpty ? nil : justification,
+            expectedOutcome: expectedOutcome.isEmpty ? nil : expectedOutcome,
+            riskAssessment: riskAssessment.isEmpty ? nil : riskAssessment,
+            theater: theater,
+            industrySegment: industrySegment.isEmpty ? nil : industrySegment
+        ) { success, _ in
+            isSaving = false
+            if success {
+                isPresented = false
+            } else {
+                errorMessage = "Failed to create request. Please try again."
             }
         }
     }
@@ -1531,6 +1174,7 @@ struct LabeledField<Content: View>: View {
 
 enum RequestDetailMode {
     case view
+    case edit
     case revise
 }
 
@@ -1539,36 +1183,33 @@ struct RequestDetailView: View {
     @Binding var isPresented: Bool
     var mode: RequestDetailMode = .view
     @EnvironmentObject var dataService: DataService
-    @State private var showingWithdrawSheet = false
-    @State private var withdrawComment = ""
+    @State private var showingSubmitConfirm = false
+    @State private var showingWithdrawConfirm = false
     @State private var linkedOpportunities: [SFDCOpportunity] = []
     @State private var isSaving = false
-    @State private var comment = ""
-    @State private var errorMessage: String?
-
+    
+    // Editable fields for revise mode
     @State private var editedJustification: String = ""
     @State private var editedOutcome: String = ""
     @State private var editedRisk: String = ""
-
+    
+    private var isEditable: Bool {
+        mode == .edit || mode == .revise
+    }
+    
     private var canWithdraw: Bool {
         request.canWithdraw && mode == .view
     }
-
-    private var formattedCreatedAt: String {
-        guard let date = request.createdAt else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-
+    
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text(request.requestTitle)
                     .font(.title2)
                     .fontWeight(.bold)
-
+                
+                StatusBadge(status: request.status)
+                
                 if mode == .revise {
                     Text("(Revising)")
                         .font(.caption)
@@ -1578,57 +1219,30 @@ struct RequestDetailView: View {
                         .background(Color.orange.opacity(0.1))
                         .cornerRadius(4)
                 }
-
+                
                 Spacer()
-
-                StatusBadge(status: request.status)
+                
+                Button("Close") { isPresented = false }
+                    .keyboardShortcut(.escape)
             }
             .padding()
-
+            
             Divider()
-
+            
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     GroupBox("Request Details") {
                         VStack(alignment: .leading, spacing: 12) {
-                            LabeledField(label: "Title") {
-                                Text(request.requestTitle)
-                            }
-                            LabeledField(label: "Account") {
-                                Text(request.accountName ?? "—")
-                            }
-                            HStack(spacing: 16) {
-                                LabeledField(label: "Investment Type") {
-                                    Text(request.investmentType ?? "—")
-                                }
-                                LabeledField(label: "Amount Requested") {
-                                    Text(request.formattedAmount)
-                                }
-                                LabeledField(label: "Expected ROI") {
-                                    Text(request.expectedRoi ?? "—")
-                                }
-                            }
-                            HStack(spacing: 16) {
-                                LabeledField(label: "Quarter") {
-                                    Text(request.investmentQuarter ?? "—")
-                                }
-                                LabeledField(label: "Theater") {
-                                    Text(request.theater ?? "—")
-                                }
-                                LabeledField(label: "Industry Segment") {
-                                    Text(request.industrySegment ?? "—")
-                                }
-                            }
-                            if let link = request.sfdcOpportunityLink, !link.isEmpty {
-                                LabeledField(label: "Salesforce Record URL") {
-                                    Link(link, destination: URL(string: link)!)
-                                        .foregroundColor(.blue)
-                                }
-                            }
+                            DetailRow(label: "Account", value: request.accountName ?? "—")
+                            DetailRow(label: "Investment Type", value: request.investmentType ?? "—")
+                            DetailRow(label: "Amount", value: request.formattedAmount)
+                            DetailRow(label: "Quarter", value: request.investmentQuarter ?? "—")
+                            DetailRow(label: "Theater", value: request.theater ?? "—")
+                            DetailRow(label: "Industry Segment", value: request.industrySegment ?? "—")
                         }
                         .padding()
                     }
-
+                    
                     GroupBox("Business Case") {
                         VStack(alignment: .leading, spacing: 12) {
                             if mode == .revise {
@@ -1657,23 +1271,14 @@ struct RequestDetailView: View {
                                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.3)))
                                 }
                             } else {
-                                LabeledField(label: "Business Justification") {
-                                    Text(request.businessJustification ?? "—")
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                LabeledField(label: "Expected Outcome") {
-                                    Text(request.expectedOutcome ?? "—")
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                LabeledField(label: "Risk Assessment") {
-                                    Text(request.riskAssessment ?? "—")
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
+                                DetailRow(label: "Business Justification", value: request.businessJustification ?? "—")
+                                DetailRow(label: "Expected Outcome", value: request.expectedOutcome ?? "—")
+                                DetailRow(label: "Risk Assessment", value: request.riskAssessment ?? "—")
                             }
                         }
                         .padding()
                     }
-
+                    
                     if request.isRejected, let gvpComments = request.gvpComments, !gvpComments.isEmpty {
                         GroupBox("Rejection Feedback") {
                             VStack(alignment: .leading, spacing: 8) {
@@ -1683,12 +1288,63 @@ struct RequestDetailView: View {
                             .padding()
                         }
                     }
-
-                    GroupBox("Activity Log") {
-                        ApprovalLogContent(request: request)
-                            .padding()
+                    
+                    GroupBox("Approval Status") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            DetailRow(label: "Created By", value: request.createdByName ?? "—")
+                            DetailRow(label: "Current Status", value: request.statusDisplayName)
+                            
+                            if let nextApprover = request.nextApproverName, !request.isFinalApproved && request.status != "REJECTED" {
+                                DetailRow(label: "Pending Approval", value: "\(nextApprover)\(request.nextApproverTitle != nil ? " (\(request.nextApproverTitle!))" : "")")
+                            }
+                        }
+                        .padding()
                     }
-
+                    
+                    if request.dmApprovedBy != nil || request.rdApprovedBy != nil || request.avpApprovedBy != nil || request.gvpApprovedBy != nil {
+                        GroupBox("Approval History") {
+                            VStack(alignment: .leading, spacing: 16) {
+                                if let dmApprover = request.dmApprovedBy {
+                                    ApprovalHistoryRow(
+                                        level: "DM",
+                                        approverName: dmApprover,
+                                        approverTitle: request.dmApprovedByTitle,
+                                        approvedAt: request.dmApprovedAt,
+                                        comments: request.dmComments
+                                    )
+                                }
+                                if let rdApprover = request.rdApprovedBy {
+                                    ApprovalHistoryRow(
+                                        level: "RD",
+                                        approverName: rdApprover,
+                                        approverTitle: request.rdApprovedByTitle,
+                                        approvedAt: request.rdApprovedAt,
+                                        comments: request.rdComments
+                                    )
+                                }
+                                if let avpApprover = request.avpApprovedBy {
+                                    ApprovalHistoryRow(
+                                        level: "AVP",
+                                        approverName: avpApprover,
+                                        approverTitle: request.avpApprovedByTitle,
+                                        approvedAt: request.avpApprovedAt,
+                                        comments: request.avpComments
+                                    )
+                                }
+                                if let gvpApprover = request.gvpApprovedBy {
+                                    ApprovalHistoryRow(
+                                        level: "GVP/Final",
+                                        approverName: gvpApprover,
+                                        approverTitle: request.gvpApprovedByTitle,
+                                        approvedAt: request.gvpApprovedAt,
+                                        comments: request.gvpComments
+                                    )
+                                }
+                            }
+                            .padding()
+                        }
+                    }
+                    
                     if !linkedOpportunities.isEmpty {
                         GroupBox("Linked Opportunities") {
                             VStack(alignment: .leading, spacing: 8) {
@@ -1707,58 +1363,41 @@ struct RequestDetailView: View {
                             .padding()
                         }
                     }
-
-                    if let error = errorMessage {
-                        Text(error)
-                            .foregroundColor(.red)
-                            .font(.caption)
-                    }
-
-                    if mode == .revise {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Comment (optional)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            TextField("Add a comment...", text: $comment)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
                 }
                 .padding()
             }
-
+            
             Divider()
-
+            
             HStack {
-                Button("Cancel") { isPresented = false }
-                    .keyboardShortcut(.escape)
-
-                Spacer()
-
                 if mode == .revise {
                     Button("Save as Draft") {
                         saveRevision(submit: false)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.yellow)
-                    .foregroundColor(.black)
+                    .buttonStyle(.bordered)
                     .disabled(isSaving)
-
+                    
                     Button("Submit") {
                         saveRevision(submit: true)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isSaving)
+                } else if mode == .edit && request.isEditable {
+                    Button("Submit for Approval") {
+                        showingSubmitConfirm = true
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-
+                
                 if canWithdraw {
                     Button("Withdraw") {
-                        showingWithdrawSheet = true
+                        showingWithdrawConfirm = true
                     }
                     .buttonStyle(.bordered)
-                    .tint(.yellow)
                 }
-
+                
+                Spacer()
+                
                 if isSaving {
                     ProgressView()
                         .scaleEffect(0.8)
@@ -1775,46 +1414,32 @@ struct RequestDetailView: View {
                 linkedOpportunities = opps
             }
         }
-        .sheet(isPresented: $showingWithdrawSheet) {
-            VStack(spacing: 16) {
-                Text("Withdraw Request")
-                    .font(.headline)
-                Text("This will return the request to Draft status and clear all approvals.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Reason for withdrawal")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    TextEditor(text: $withdrawComment)
-                        .frame(height: 80)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.3)))
-                }
-                HStack {
-                    Button("Cancel") {
-                        withdrawComment = ""
-                        showingWithdrawSheet = false
+        .alert("Submit Request", isPresented: $showingSubmitConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Submit") {
+                dataService.submitRequest(requestId: request.requestId) { success, error in
+                    if success {
+                        isPresented = false
                     }
-                    Spacer()
-                    Button("Withdraw") {
-                        dataService.withdrawRequest(requestId: request.requestId, comment: withdrawComment.isEmpty ? nil : withdrawComment) { success, _ in
-                            if success {
-                                withdrawComment = ""
-                                showingWithdrawSheet = false
-                                isPresented = false
-                            }
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.yellow)
                 }
             }
-            .padding(24)
-            .frame(width: 400)
+        } message: {
+            Text("Submit this request for approval? Once submitted, it cannot be edited unless withdrawn.")
+        }
+        .alert("Withdraw Request", isPresented: $showingWithdrawConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Withdraw") {
+                dataService.withdrawRequest(requestId: request.requestId) { success, error in
+                    if success {
+                        isPresented = false
+                    }
+                }
+            }
+        } message: {
+            Text("Withdraw this request back to Draft status? This will clear approvals from the current level forward.")
         }
     }
-
+    
     private func saveRevision(submit: Bool) {
         isSaving = true
         dataService.reviseRequest(
@@ -1822,8 +1447,7 @@ struct RequestDetailView: View {
             justification: editedJustification,
             outcome: editedOutcome,
             risk: editedRisk,
-            submit: submit,
-            comment: comment.isEmpty ? nil : comment
+            submit: submit
         ) { success, error in
             isSaving = false
             if success {
@@ -1846,227 +1470,6 @@ struct DetailRow: View {
             
             Text(value)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-struct ApprovalLogContent: View {
-    let request: InvestmentRequest
-    @EnvironmentObject var dataService: DataService
-    @State private var dynamicSteps: [ApprovalStep] = []
-    @State private var loadedSteps = false
-
-    private func formatDate(_ date: Date?) -> String {
-        guard let date = date else { return "" }
-        return DateFormatter.shortDateTime.string(from: date)
-    }
-
-    private func statusIcon(_ status: String) -> (name: String, color: Color) {
-        switch status {
-        case "Created": return ("doc.circle.fill", .blue)
-        case "Draft": return ("pencil.circle.fill", .gray)
-        case "Submitted": return ("paperplane.circle.fill", .blue)
-        case "Withdrawn": return ("arrow.uturn.backward.circle.fill", .yellow)
-        case "Rejected": return ("xmark.circle.fill", .red)
-        default: return ("checkmark.circle.fill", .green)
-        }
-    }
-
-    private var hasDynamicSteps: Bool {
-        if let steps = request.approvalSteps, !steps.isEmpty { return true }
-        return !dynamicSteps.isEmpty
-    }
-
-    private var effectiveSteps: [ApprovalStep] {
-        if let steps = request.approvalSteps, !steps.isEmpty { return steps }
-        return dynamicSteps
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            logRow(status: "Created", user: request.createdByName, comment: nil, date: request.createdAt)
-
-            if let draftByName = request.draftByName, request.draftAt != nil {
-                ApprovalLogDivider()
-                logRow(status: "Draft", user: draftByName, comment: request.draftComment, date: request.draftAt)
-            }
-
-            if let submittedByName = request.submittedByName {
-                ApprovalLogDivider()
-                logRow(status: "Submitted", user: submittedByName, comment: request.submittedComment, date: request.submittedAt)
-            }
-
-            if hasDynamicSteps {
-                ForEach(effectiveSteps) { step in
-                    ApprovalLogDivider()
-                    if step.isApproved {
-                        logRow(
-                            status: step.isFinalStep ? "Final Approved" : "Approved",
-                            user: step.approverName,
-                            title: step.approverTitle,
-                            comment: step.comments,
-                            dateString: step.approvedAt
-                        )
-                    } else {
-                        HStack(spacing: 8) {
-                            Image(systemName: "clock.circle")
-                                .foregroundColor(.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Pending: \(step.approverName ?? "Unknown")\(step.approverTitle != nil ? " (\(step.approverTitle!))" : "")")
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.orange)
-                                Text(step.isFinalStep ? "Final approval" : "Step \(step.stepOrder)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 6)
-                    }
-                }
-            } else {
-                if request.dmApprovedBy != nil {
-                    ApprovalLogDivider()
-                    logRow(status: "DM Approved", user: request.dmApprovedBy, title: request.dmApprovedByTitle, comment: request.dmComments, date: request.dmApprovedAt)
-                }
-                if request.rdApprovedBy != nil {
-                    ApprovalLogDivider()
-                    logRow(status: "RD Approved", user: request.rdApprovedBy, title: request.rdApprovedByTitle, comment: request.rdComments, date: request.rdApprovedAt)
-                }
-                if request.avpApprovedBy != nil {
-                    ApprovalLogDivider()
-                    logRow(status: "AVP Approved", user: request.avpApprovedBy, title: request.avpApprovedByTitle, comment: request.avpComments, date: request.avpApprovedAt)
-                }
-                if request.gvpApprovedBy != nil {
-                    ApprovalLogDivider()
-                    logRow(status: "GVP/Final Approved", user: request.gvpApprovedBy, title: request.gvpApprovedByTitle, comment: request.gvpComments, date: request.gvpApprovedAt)
-                }
-
-                if let nextApprover = request.nextApproverName, !request.isFinalApproved && request.status != "REJECTED" && request.status != "DRAFT" {
-                    ApprovalLogDivider()
-                    HStack(spacing: 8) {
-                        Image(systemName: "clock.circle")
-                            .foregroundColor(.orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Pending: \(nextApprover)\(request.nextApproverTitle != nil ? " (\(request.nextApproverTitle!))" : "")")
-                                .fontWeight(.medium)
-                                .foregroundColor(.orange)
-                            Text("Awaiting approval")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 6)
-                }
-            }
-
-            if let withdrawnByName = request.withdrawnByName {
-                ApprovalLogDivider()
-                logRow(status: "Withdrawn", user: withdrawnByName, comment: request.withdrawnComment, date: request.withdrawnAt)
-            }
-        }
-        .onAppear {
-            if !loadedSteps && request.approvalSteps == nil {
-                dataService.fetchApprovalSteps(requestId: request.requestId) { steps in
-                    dynamicSteps = steps
-                    loadedSteps = true
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func logRow(status: String, user: String?, title: String? = nil, comment: String?, date: Date?) -> some View {
-        let icon = statusIcon(status)
-        HStack(spacing: 8) {
-            Image(systemName: icon.name)
-                .foregroundColor(icon.color)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(status)
-                        .fontWeight(.semibold)
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(icon.color.opacity(0.15))
-                        .cornerRadius(4)
-                    if let user = user {
-                        Text(user)
-                            .fontWeight(.medium)
-                    }
-                    if let title = title, !title.isEmpty {
-                        Text("(\(title))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Text(formatDate(date))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                if let comment = comment, !comment.isEmpty {
-                    Text(comment)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .italic()
-                }
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
-    @ViewBuilder
-    private func logRow(status: String, user: String?, title: String? = nil, comment: String?, dateString: String?) -> some View {
-        let icon = statusIcon(status)
-        HStack(spacing: 8) {
-            Image(systemName: icon.name)
-                .foregroundColor(icon.color)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(status)
-                        .fontWeight(.semibold)
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(icon.color.opacity(0.15))
-                        .cornerRadius(4)
-                    if let user = user {
-                        Text(user)
-                            .fontWeight(.medium)
-                    }
-                    if let title = title, !title.isEmpty {
-                        Text("(\(title))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    if let ds = dateString {
-                        Text(ds.prefix(19).replacingOccurrences(of: "T", with: " "))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                if let comment = comment, !comment.isEmpty {
-                    Text(comment)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .italic()
-                }
-            }
-        }
-        .padding(.vertical, 6)
-    }
-}
-
-struct ApprovalLogDivider: View {
-    var body: some View {
-        HStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.3))
-                .frame(width: 1, height: 12)
-                .padding(.leading, 10)
-            Spacer()
         }
     }
 }

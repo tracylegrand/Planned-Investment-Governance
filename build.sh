@@ -41,6 +41,23 @@ sed -e "s/\${APP_NAME}/${APP_NAME}/g" \
 
 echo "Generated Info.plist"
 
+# Generate GitVersion.swift from git
+GIT_VERSION_FILE="${PROJECT_DIR}/Sources/Generated/GitVersion.swift"
+mkdir -p "${PROJECT_DIR}/Sources/Generated"
+GIT_HASH=$(cd "$PROJECT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_TAG=$(cd "$PROJECT_DIR" && git describe --tags --always 2>/dev/null || echo "$GIT_HASH")
+GIT_BRANCH=$(cd "$PROJECT_DIR" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+cat > "$GIT_VERSION_FILE" << EOF
+enum GitVersion {
+    static let version = "${VERSION}"
+    static let hash = "${GIT_HASH}"
+    static let tag = "${GIT_TAG}"
+    static let branch = "${GIT_BRANCH}"
+    static let display = "${VERSION} (${GIT_HASH})"
+}
+EOF
+echo "Generated GitVersion.swift (${GIT_TAG})"
+
 # Build release
 echo "Compiling Swift..."
 cd "$PROJECT_DIR"

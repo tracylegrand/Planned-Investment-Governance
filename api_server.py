@@ -989,6 +989,35 @@ def get_approval_chain_endpoint():
     chain = resolve_approval_chain(employee_id, theater)
     return jsonify(chain)
 
+@app.route('/api/team-members')
+def get_team_members():
+    user = get_effective_user()
+    if not user or not user.get("employee_id"):
+        return jsonify({"error": "No current user"}), 400
+    manager_eid = int(user["employee_id"])
+    sf_conn = get_snowflake_connection()
+    try:
+        cur = sf_conn.cursor()
+        cur.execute("""
+            WITH RECURSIVE team AS (
+                SELECT EMPLOYEE_ID
+                FROM HR.WORKDAY_BASIC.SFDC_WORKDAY_USER_VW
+                WHERE MANAGER_ID = %s AND ACTIVE_STATUS = '1'
+                UNION ALL
+                SELECT w.EMPLOYEE_ID
+                FROM HR.WORKDAY_BASIC.SFDC_WORKDAY_USER_VW w
+                JOIN team t ON w.MANAGER_ID = t.EMPLOYEE_ID
+                WHERE w.ACTIVE_STATUS = '1'
+            )
+            SELECT EMPLOYEE_ID FROM team
+        """, (manager_eid,))
+        ids = [int(r[0]) for r in cur.fetchall()]
+        return jsonify({"employee_ids": ids})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        sf_conn.close()
+
 @app.route('/api/summary')
 def get_summary():
     cache_conn = get_cache_connection()

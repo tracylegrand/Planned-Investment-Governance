@@ -27,6 +27,9 @@ class UserSettings: ObservableObject {
     @Published var showMiniBars: Bool {
         didSet { UserDefaults.standard.set(showMiniBars, forKey: "showMiniBars") }
     }
+    @Published var showPriorYear: Bool {
+        didSet { UserDefaults.standard.set(showPriorYear, forKey: "showPriorYear") }
+    }
     
     private init() {
         self.defaultTheater = UserDefaults.standard.string(forKey: "defaultTheater") ?? "All"
@@ -37,12 +40,12 @@ class UserSettings: ObservableObject {
         self.showCompactPills = UserDefaults.standard.object(forKey: "showCompactPills") as? Bool ?? true
         self.showStepper = UserDefaults.standard.object(forKey: "showStepper") as? Bool ?? true
         self.showMiniBars = UserDefaults.standard.object(forKey: "showMiniBars") as? Bool ?? true
+        self.showPriorYear = UserDefaults.standard.object(forKey: "showPriorYear") as? Bool ?? false
     }
 }
 
 struct SettingsView: View {
     @ObservedObject var settings = UserSettings.shared
-    @EnvironmentObject var dataService: DataService
     @Environment(\.dismiss) var dismiss
     
     @State private var tempDefaultTheater: String
@@ -53,18 +56,19 @@ struct SettingsView: View {
     @State private var tempShowCompactPills: Bool
     @State private var tempShowStepper: Bool
     @State private var tempShowMiniBars: Bool
+    @State private var tempShowPriorYear: Bool
     @State private var showPortfolioPicker = false
     
-    private var theaters: [String] {
-        ["All"] + dataService.sfdcTheaters
-    }
+    private let theaters = TheaterMapping.allTheaters
     private let quarterOptions = ["Current Quarter", "Current Fiscal Year", "All Quarters"]
     
-    private var availableIndustries: [String] {
+    private let portfoliosByTheater = TheaterMapping.portfoliosByTheater
+    
+    private var availablePortfolios: [String] {
         if tempDefaultTheater == "All" {
-            return dataService.sfdcIndustries
+            return portfoliosByTheater.values.flatMap { $0 }.sorted()
         }
-        return dataService.sfdcIndustriesByTheater[tempDefaultTheater] ?? []
+        return portfoliosByTheater[tempDefaultTheater] ?? []
     }
     
     private var portfolioButtonLabel: String {
@@ -91,6 +95,7 @@ struct SettingsView: View {
         _tempShowCompactPills = State(initialValue: s.showCompactPills)
         _tempShowStepper = State(initialValue: s.showStepper)
         _tempShowMiniBars = State(initialValue: s.showMiniBars)
+        _tempShowPriorYear = State(initialValue: s.showPriorYear)
     }
     
     var body: some View {
@@ -109,11 +114,11 @@ struct SettingsView: View {
                         ForEach(theaters, id: \.self) { Text($0) }
                     }
                     .onChange(of: tempDefaultTheater) { _, _ in
-                        tempDefaultPortfolios = tempDefaultPortfolios.filter { availableIndustries.contains($0) }
+                        tempDefaultPortfolios = tempDefaultPortfolios.filter { availablePortfolios.contains($0) }
                     }
                     
                     HStack {
-                        Text("Default Industry(s)")
+                        Text("Default Portfolio(s)")
                         Spacer()
                         Button(action: { showPortfolioPicker.toggle() }) {
                             HStack(spacing: 4) {
@@ -129,15 +134,15 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 0) {
                                 HStack {
                                     Button(action: {
-                                        if tempDefaultPortfolios.count == availableIndustries.count {
+                                        if tempDefaultPortfolios.count == availablePortfolios.count {
                                             tempDefaultPortfolios.removeAll()
                                         } else {
-                                            tempDefaultPortfolios = Set(availableIndustries)
+                                            tempDefaultPortfolios = Set(availablePortfolios)
                                         }
                                     }) {
                                         HStack(spacing: 6) {
-                                            Image(systemName: tempDefaultPortfolios.count == availableIndustries.count ? "checkmark.square.fill" : "square")
-                                                .foregroundColor(tempDefaultPortfolios.count == availableIndustries.count ? .blue : .secondary)
+                                            Image(systemName: tempDefaultPortfolios.count == availablePortfolios.count ? "checkmark.square.fill" : "square")
+                                                .foregroundColor(tempDefaultPortfolios.count == availablePortfolios.count ? .blue : .secondary)
                                             Text("Select All")
                                                 .fontWeight(.medium)
                                         }
@@ -156,7 +161,7 @@ struct SettingsView: View {
                                 
                                 ScrollView {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        ForEach(availableIndustries, id: \.self) { portfolio in
+                                        ForEach(availablePortfolios, id: \.self) { portfolio in
                                             Button(action: {
                                                 if tempDefaultPortfolios.contains(portfolio) {
                                                     tempDefaultPortfolios.remove(portfolio)
@@ -207,6 +212,10 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                
+                Section("Pipeline Data Range") {
+                    Toggle("Show Prior Fiscal Year", isOn: $tempShowPriorYear)
+                }
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
@@ -230,6 +239,7 @@ struct SettingsView: View {
                     settings.showCompactPills = tempShowCompactPills
                     settings.showStepper = tempShowStepper
                     settings.showMiniBars = tempShowMiniBars
+                    settings.showPriorYear = tempShowPriorYear
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -273,7 +283,7 @@ struct DashboardView: View {
             if selectedIndustries.count == 1 {
                 parts.append(selectedIndustries.first!)
             } else {
-                parts.append("\(selectedIndustries.count) Industries")
+                parts.append("\(selectedIndustries.count) Portfolios")
             }
         }
         
@@ -363,20 +373,20 @@ struct DashboardView: View {
         return "FY\(fiscalYear)-Q\(quarter)"
     }
     
-    private var theaters: [String] {
-        ["All"] + dataService.sfdcTheaters
-    }
+    private let theaters = TheaterMapping.allTheaters
     
-    private var availableIndustries: [String] {
+    private let portfoliosByTheater = TheaterMapping.portfoliosByTheater
+    
+    private var availablePortfolios: [String] {
         if selectedTheater == "All" {
-            return dataService.sfdcIndustries
+            return portfoliosByTheater.values.flatMap { $0 }.sorted()
         }
-        return dataService.sfdcIndustriesByTheater[selectedTheater] ?? []
+        return portfoliosByTheater[selectedTheater] ?? []
     }
     private let statuses = ["All", "DRAFT", "SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED", "FINAL_APPROVED", "REJECTED"]
     
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        GitVersion.display
     }
     
     private var currentFiscalYearAndQuarter: (year: Int, quarter: Int) {
@@ -420,7 +430,7 @@ struct DashboardView: View {
     
     var filteredRequests: [InvestmentRequest] {
         dataService.investmentRequests.filter { request in
-            let matchesTheater = selectedTheater == "All" || request.theater == selectedTheater
+            let matchesTheater = selectedTheater == "All" || TheaterMapping.dbCodes(forDisplayName: selectedTheater).contains(request.theater ?? "")
             let matchesIndustry = selectedIndustries.isEmpty || selectedIndustries.contains(request.industrySegment ?? "")
             let matchesQuarter: Bool
             if selectedQuarters.isEmpty {
@@ -438,37 +448,29 @@ struct DashboardView: View {
         }
     }
     
-    var totalMyRequests: Int {
-        let currentUserName = dataService.currentUser?.displayName
-        let currentUsername = dataService.currentUser?.snowflakeUsername
-        let currentEmployeeId = dataService.currentUser?.employeeId
-        return dataService.investmentRequests.filter { request in
-            let isCreator = request.createdByName == currentUserName ||
-                request.createdBy == currentUsername ||
-                (currentEmployeeId != nil && (request.createdByEmployeeId == currentEmployeeId || request.onBehalfOfEmployeeId == currentEmployeeId))
-            let isPendingApproval = ["SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED"].contains(request.status)
-            let isMyApproval = isPendingApproval && request.nextApproverName == currentUserName
-            return isCreator || isMyApproval
-        }.count
-    }
-    
-    var filteredSummary: (total: Int, draft: Int, pendingApproval: Int, rejected: Int, approved: Int, totalRequested: Double, draftAmount: Double, pendingAmount: Double, rejectedAmount: Double, approvedAmount: Double) {
+    var filteredSummary: (total: Int, draft: Int, inReview: Int, approved: Int, myRequests: Int, totalRequested: Double, totalApproved: Double, draftAmount: Double, myRequestsAmount: Double) {
         let requests = filteredRequests
         let draftRequests = requests.filter { $0.status == "DRAFT" }
         let draft = draftRequests.count
         let draftAmount = draftRequests.compactMap { $0.requestedAmount }.reduce(0, +)
-        let pendingRequests = requests.filter { ["SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED"].contains($0.status) }
-        let pendingApproval = pendingRequests.count
-        let pendingAmount = pendingRequests.compactMap { $0.requestedAmount }.reduce(0, +)
-        let rejectedRequests = requests.filter { $0.status == "REJECTED" }
-        let rejected = rejectedRequests.count
-        let rejectedAmount = rejectedRequests.compactMap { $0.requestedAmount }.reduce(0, +)
+        let inReview = requests.filter { ["SUBMITTED", "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED"].contains($0.status) }.count
         let approvedRequests = requests.filter { $0.status == "FINAL_APPROVED" }
         let approved = approvedRequests.count
-        let approvedAmount = approvedRequests.compactMap { $0.requestedAmount }.reduce(0, +)
         let totalRequested = requests.compactMap { $0.requestedAmount }.reduce(0, +)
+        let totalApproved = approvedRequests.compactMap { $0.requestedAmount }.reduce(0, +)
         
-        return (requests.count, draft, pendingApproval, rejected, approved, totalRequested, draftAmount, pendingAmount, rejectedAmount, approvedAmount)
+        let currentUserName = dataService.currentUser?.displayName
+        let currentUsername = dataService.currentUser?.snowflakeUsername
+        let teamIds = dataService.teamEmployeeIds
+        let myRequestsList = requests.filter { request in
+            let isMyRequest = request.createdByName == currentUserName || request.createdBy == currentUsername
+            let isTeamRequest = request.createdByEmployeeId.map { teamIds.contains($0) } ?? false
+            return isMyRequest || isTeamRequest
+        }
+        let myRequests = myRequestsList.count
+        let myRequestsAmount = myRequestsList.compactMap { $0.requestedAmount }.reduce(0, +)
+        
+        return (requests.count, draft, inReview, approved, myRequests, totalRequested, totalApproved, draftAmount, myRequestsAmount)
     }
     
     var fiscalYears: [String] {
@@ -484,9 +486,12 @@ struct DashboardView: View {
             currentFY = year
         }
         
-        let prevYear = "FY\(currentFY - 1)"
         let currYear = "FY\(currentFY)"
-        return [prevYear, currYear]
+        if userSettings.showPriorYear {
+            let prevYear = "FY\(currentFY - 1)"
+            return [prevYear, currYear]
+        }
+        return [currYear]
     }
     
     var requestsByFiscalYear: [(year: String, count: Int, amount: Double)] {
@@ -513,107 +518,55 @@ struct DashboardView: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    Text("Investment Governance Dashboard")
-                        .font(.title)
-                        .fontWeight(.bold)
-                    
-                    Spacer()
-                    
-                    if let user = dataService.currentUser {
-                        HStack(spacing: 6) {
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(user.displayName)
-                                    .font(.headline)
-                                if let title = user.title {
-                                    Text(title)
-                                        .font(.subheadline)
-                                        .foregroundColor(dataService.impersonationStatus.active ? .orange : .secondary)
-                                }
-                            }
-                            if dataService.impersonationStatus.active {
-                                Button(action: {
-                                    dataService.stopImpersonating { _ in }
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.red)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Clear impersonation")
-                            }
+        VStack(spacing: 0) {
+            HStack {
+                Text("Investment Governance Dashboard")
+                    .font(.title)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                if let user = dataService.currentUser {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(user.displayName)
+                            .font(.headline)
+                        if let title = user.title {
+                            Text(title)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
                         }
-                        .padding(.horizontal, dataService.impersonationStatus.active ? 10 : 0)
-                        .padding(.vertical, dataService.impersonationStatus.active ? 6 : 0)
-                        .overlay(
-                            Group {
-                                if dataService.impersonationStatus.active {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.orange, lineWidth: 2)
-                                }
-                            }
-                        )
-                        
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Button {
-                                navigationState.filterMyRequests = true
-                                navigationState.passedStatus = ""
-                                navigationState.passedQuarters = []
-                                navigationState.passedTheater = ""
-                                navigationState.passedIndustries = []
-                                navigationState.filterPendingMyApproval = true
-                                navigationState.selectedTab = 1
-                                navigationState.triggerNavigation()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "person.fill")
-                                    Text("My Requests (\(totalMyRequests))")
-                                }
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.purple.opacity(0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(Color.purple, lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.purple)
-                            
-                            HStack(spacing: 8) {
-                                Text("v\(appVersion)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                Button {
-                                    showSettings = true
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "gear")
-                                        Text("Settings")
-                                    }
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .stroke(Color.blue, lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundColor(.blue)
-                            }
-                        }
-                        .padding(.leading, 8)
                     }
+                    
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Version \(appVersion)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Button {
+                            showSettings = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "gear")
+                                Text("Settings")
+                            }
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.blue, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.blue)
+                    }
+                    .padding(.leading, 8)
                 }
-                .padding(.horizontal)
-                .sheet(isPresented: $showSettings) {
-                    SettingsView()
-                }
+            }
+            .padding()
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
                 
                 HStack(spacing: 12) {
                     Picker("Theater", selection: $selectedTheater) {
@@ -625,16 +578,16 @@ struct DashboardView: View {
                         showIndustryPicker.toggle()
                     } label: {
                         HStack {
-                            Text(selectedIndustries.isEmpty ? "All Industries" : "\(selectedIndustries.count) Selected")
+                            Text(selectedIndustries.isEmpty ? "All Portfolios" : "\(selectedIndustries.count) Selected")
                             Image(systemName: "chevron.down")
                         }
                         .frame(width: 140)
                     }
-                    .disabled(availableIndustries.isEmpty)
+                    .disabled(availablePortfolios.isEmpty)
                     .popover(isPresented: $showIndustryPicker, arrowEdge: .bottom) {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text("Select Industries")
+                                Text("Select Portfolios")
                                     .font(.headline)
                                 Spacer()
                                 Button("Clear") {
@@ -653,15 +606,15 @@ struct DashboardView: View {
                             
                             VStack(alignment: .leading, spacing: 8) {
                                 Button {
-                                    if selectedIndustries.count == availableIndustries.count {
+                                    if selectedIndustries.count == availablePortfolios.count {
                                         selectedIndustries.removeAll()
                                     } else {
-                                        selectedIndustries = Set(availableIndustries)
+                                        selectedIndustries = Set(availablePortfolios)
                                     }
                                 } label: {
                                     HStack {
-                                        Image(systemName: selectedIndustries.count == availableIndustries.count ? "checkmark.square.fill" : "square")
-                                            .foregroundColor(selectedIndustries.count == availableIndustries.count ? .blue : .secondary)
+                                        Image(systemName: selectedIndustries.count == availablePortfolios.count ? "checkmark.square.fill" : "square")
+                                            .foregroundColor(selectedIndustries.count == availablePortfolios.count ? .blue : .secondary)
                                         Text("All")
                                             .fontWeight(.semibold)
                                             .foregroundColor(.primary)
@@ -670,7 +623,7 @@ struct DashboardView: View {
                                 }
                                 .buttonStyle(.plain)
                                 
-                                ForEach(availableIndustries, id: \.self) { industry in
+                                ForEach(availablePortfolios, id: \.self) { industry in
                                     Button {
                                         if selectedIndustries.contains(industry) {
                                             selectedIndustries.remove(industry)
@@ -798,9 +751,12 @@ struct DashboardView: View {
                     Spacer()
                 }
                 .padding(.horizontal)
+                .padding(.bottom)
                 
                 Divider()
-                    .padding(.vertical, 8)
+                
+                ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
                 
                 let summary = filteredSummary
                 let sectionWidth: CGFloat = 1040
@@ -819,39 +775,39 @@ struct DashboardView: View {
                                 .padding(.bottom, 2)
                             
                             HStack(spacing: 0) {
-                                SummaryCardCompact(title: "Draft", value: "\(summary.draft)", color: .gray, action: {
+                                SummaryCardCompact(title: "Total Requests", value: "\(summary.total)", color: .blue, action: {
+                                    navigateToRequests(status: "All")
+                                })
+                                .frame(maxWidth: .infinity)
+                                SummaryCardCompact(title: "Total Approved", value: "\(summary.approved)", color: .green, action: {
+                                    navigateToRequests(status: "FINAL_APPROVED")
+                                })
+                                .frame(maxWidth: .infinity)
+                                SummaryCardCompact(title: "Total in Draft", value: "\(summary.draft)", color: .gray, action: {
                                     navigateToRequests(status: "DRAFT")
                                 })
                                 .frame(maxWidth: .infinity)
-                                SummaryCardCompact(title: "Pending Approval", value: "\(summary.pendingApproval)", color: .orange, action: {
-                                    navigateToRequests(status: "IN_REVIEW")
-                                })
-                                .frame(maxWidth: .infinity)
-                                SummaryCardCompact(title: "Rejected", value: "\(summary.rejected)", color: .red, action: {
-                                    navigateToRequests(status: "REJECTED")
-                                })
-                                .frame(maxWidth: .infinity)
-                                SummaryCardCompact(title: "Approved", value: "\(summary.approved)", color: .green, action: {
-                                    navigateToRequests(status: "FINAL_APPROVED")
+                                SummaryCardCompact(title: "My/Team Requests", value: "\(summary.myRequests)", color: .purple, action: {
+                                    navigateToRequests(status: selectedStatus != "All" ? selectedStatus : "All", myRequests: true)
                                 })
                                 .frame(maxWidth: .infinity)
                             }
                             
                             HStack(spacing: 0) {
+                                SummaryCardCompact(title: "Requested Amount", value: formatCurrency(summary.totalRequested), color: .blue, action: {
+                                    navigateToRequests(status: "All")
+                                })
+                                .frame(maxWidth: .infinity)
+                                SummaryCardCompact(title: "Approved Amount", value: formatCurrency(summary.totalApproved), color: .green, action: {
+                                    navigateToRequests(status: "FINAL_APPROVED")
+                                })
+                                .frame(maxWidth: .infinity)
                                 SummaryCardCompact(title: "Draft Amount", value: formatCurrency(summary.draftAmount), color: .gray, action: {
                                     navigateToRequests(status: "DRAFT")
                                 })
                                 .frame(maxWidth: .infinity)
-                                SummaryCardCompact(title: "Pending Amount", value: formatCurrency(summary.pendingAmount), color: .orange, action: {
-                                    navigateToRequests(status: "IN_REVIEW")
-                                })
-                                .frame(maxWidth: .infinity)
-                                SummaryCardCompact(title: "Rejected Amount", value: formatCurrency(summary.rejectedAmount), color: .red, action: {
-                                    navigateToRequests(status: "REJECTED")
-                                })
-                                .frame(maxWidth: .infinity)
-                                SummaryCardCompact(title: "Approved Amount", value: formatCurrency(summary.approvedAmount), color: .green, action: {
-                                    navigateToRequests(status: "FINAL_APPROVED")
+                                SummaryCardCompact(title: "My/Team Amount", value: formatCurrency(summary.myRequestsAmount), color: .purple, action: {
+                                    navigateToRequests(status: selectedStatus != "All" ? selectedStatus : "All", myRequests: true)
                                 })
                                 .frame(maxWidth: .infinity)
                             }
@@ -876,7 +832,7 @@ struct DashboardView: View {
                                 .fontWeight(.bold)
                             
                             GroupBox {
-                                ApprovalPipelineView(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, navigationState: navigationState)
+                                ApprovalPipelineView(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, selectedQuarters: selectedQuarters, showPriorYear: userSettings.showPriorYear, navigationState: navigationState)
                                     .frame(maxWidth: .infinity)
                                     .padding(8)
                             }
@@ -896,7 +852,7 @@ struct DashboardView: View {
                                 .fontWeight(.bold)
                             
                             GroupBox {
-                                HorizontalFlowPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, navigationState: navigationState)
+                                HorizontalFlowPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, selectedQuarters: selectedQuarters, showPriorYear: userSettings.showPriorYear, navigationState: navigationState)
                                     .frame(maxWidth: .infinity)
                                     .padding(8)
                             }
@@ -916,7 +872,7 @@ struct DashboardView: View {
                                 .fontWeight(.bold)
                             
                             GroupBox {
-                                CompactPillPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, navigationState: navigationState)
+                                CompactPillPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, selectedQuarters: selectedQuarters, showPriorYear: userSettings.showPriorYear, navigationState: navigationState)
                                     .frame(maxWidth: .infinity)
                                     .padding(8)
                             }
@@ -936,7 +892,7 @@ struct DashboardView: View {
                                 .fontWeight(.bold)
                             
                             GroupBox {
-                                StepperPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, navigationState: navigationState)
+                                StepperPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, selectedQuarters: selectedQuarters, showPriorYear: userSettings.showPriorYear, navigationState: navigationState)
                                     .frame(maxWidth: .infinity)
                                     .padding(8)
                             }
@@ -956,7 +912,7 @@ struct DashboardView: View {
                                 .fontWeight(.bold)
                             
                             GroupBox {
-                                TwoRowArrowsPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, navigationState: navigationState)
+                                TwoRowArrowsPipeline(requests: filteredRequests, selectedTheater: selectedTheater, selectedIndustries: selectedIndustries, selectedQuarters: selectedQuarters, showPriorYear: userSettings.showPriorYear, navigationState: navigationState)
                                     .frame(maxWidth: .infinity)
                                     .padding(8)
                             }
@@ -969,13 +925,14 @@ struct DashboardView: View {
                 Spacer()
             }
             .padding(.vertical)
+            }
         }
         .onAppear { initializeFilters() }
         .onChange(of: selectedTheater) { _, _ in
-            if availableIndustries.isEmpty {
+            if availablePortfolios.isEmpty {
                 selectedIndustries.removeAll()
             } else {
-                selectedIndustries = selectedIndustries.filter { availableIndustries.contains($0) }
+                selectedIndustries = selectedIndustries.filter { availablePortfolios.contains($0) }
             }
         }
     }
@@ -1159,6 +1116,8 @@ struct ApprovalPipelineView: View {
     let requests: [InvestmentRequest]
     let selectedTheater: String
     let selectedIndustries: Set<String>
+    let selectedQuarters: Set<String>
+    let showPriorYear: Bool
     @ObservedObject var navigationState: NavigationState
     
     private var fiscalYears: [String] {
@@ -1174,9 +1133,12 @@ struct ApprovalPipelineView: View {
             currentFY = year
         }
         
-        let prevYear = "FY\(currentFY - 1)"
         let currYear = "FY\(currentFY)"
-        return [prevYear, currYear]
+        if showPriorYear {
+            let prevYear = "FY\(currentFY - 1)"
+            return [prevYear, currYear]
+        }
+        return [currYear]
     }
     
     private func stagesForYear(_ year: String) -> [(String, Int, Double)] {
@@ -1234,7 +1196,8 @@ struct ApprovalPipelineView: View {
                                 color: colorForStage(stage.0),
                                 onTap: {
                                     navigationState.passedStatus = statusCodeForStage(stage.0)
-                                    navigationState.passedQuarters = [year]
+                                    let yearQuarters = selectedQuarters.isEmpty ? Set([year]) : Set(selectedQuarters.filter { $0.hasPrefix(year) || $0 == year })
+                                    navigationState.passedQuarters = yearQuarters.isEmpty ? [year] : yearQuarters
                                     navigationState.passedTheater = selectedTheater
                                     navigationState.passedIndustries = selectedIndustries
                                     navigationState.selectedTab = 1
@@ -1338,12 +1301,19 @@ struct PipelineStageBox: View {
         .onTapGesture {
             onTap()
         }
-        .popover(isPresented: .constant(isHovering), arrowEdge: .top) {
-            Text(formatCurrencyShort(value))
-                .font(.caption)
-                .fontWeight(.medium)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+        .overlay(alignment: .top) {
+            if isHovering {
+                Text(formatCurrencyShort(value))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(6)
+                    .shadow(radius: 2)
+                    .offset(y: -28)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -1403,6 +1373,8 @@ struct HorizontalFlowPipeline: View {
     let requests: [InvestmentRequest]
     let selectedTheater: String
     let selectedIndustries: Set<String>
+    let selectedQuarters: Set<String>
+    let showPriorYear: Bool
     let navigationState: NavigationState
     
     private var fiscalYears: [String] {
@@ -1411,7 +1383,10 @@ struct HorizontalFlowPipeline: View {
         let month = calendar.component(.month, from: now)
         let year = calendar.component(.year, from: now)
         let currentFY = month >= 2 ? year + 1 : year
-        return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        if showPriorYear {
+            return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        }
+        return ["FY\(currentFY)"]
     }
     
     private func stagesForYear(_ year: String) -> [(String, Int, Double, Color, String)] {
@@ -1519,12 +1494,19 @@ struct FlowBox: View {
             }
         }
         .onTapGesture { onTap() }
-        .popover(isPresented: .constant(isHovering), arrowEdge: .top) {
-            Text(formatCurrencyShort(value))
-                .font(.caption)
-                .fontWeight(.medium)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+        .overlay(alignment: .top) {
+            if isHovering {
+                Text(formatCurrencyShort(value))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(6)
+                    .shadow(radius: 2)
+                    .offset(y: -28)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -1534,6 +1516,8 @@ struct CompactPillPipeline: View {
     let requests: [InvestmentRequest]
     let selectedTheater: String
     let selectedIndustries: Set<String>
+    let selectedQuarters: Set<String>
+    let showPriorYear: Bool
     let navigationState: NavigationState
     
     private var fiscalYears: [String] {
@@ -1542,7 +1526,10 @@ struct CompactPillPipeline: View {
         let month = calendar.component(.month, from: now)
         let year = calendar.component(.year, from: now)
         let currentFY = month >= 2 ? year + 1 : year
-        return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        if showPriorYear {
+            return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        }
+        return ["FY\(currentFY)"]
     }
     
     private func stagesForYear(_ year: String) -> [(String, Int, Double, Color, String)] {
@@ -1646,12 +1633,19 @@ struct PillButton: View {
                 }
             }
             .onTapGesture { onTap() }
-            .popover(isPresented: .constant(isHovering), arrowEdge: .top) {
-                Text(formatCurrencyShort(value))
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+            .overlay(alignment: .top) {
+                if isHovering {
+                    Text(formatCurrencyShort(value))
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(6)
+                        .shadow(radius: 2)
+                        .offset(y: -28)
+                        .allowsHitTesting(false)
+                }
             }
     }
 }
@@ -1661,6 +1655,8 @@ struct StepperPipeline: View {
     let requests: [InvestmentRequest]
     let selectedTheater: String
     let selectedIndustries: Set<String>
+    let selectedQuarters: Set<String>
+    let showPriorYear: Bool
     let navigationState: NavigationState
     
     private var fiscalYears: [String] {
@@ -1669,7 +1665,10 @@ struct StepperPipeline: View {
         let month = calendar.component(.month, from: now)
         let year = calendar.component(.year, from: now)
         let currentFY = month >= 2 ? year + 1 : year
-        return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        if showPriorYear {
+            return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        }
+        return ["FY\(currentFY)"]
     }
     
     private func stagesForYear(_ year: String) -> [(String, Int, Double, Color, String)] {
@@ -1776,12 +1775,19 @@ struct StepperNode: View {
                 }
             }
             .onTapGesture { onTap() }
-            .popover(isPresented: .constant(isHovering), arrowEdge: .top) {
-                Text(formatCurrencyShort(value))
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+            .overlay(alignment: .top) {
+                if isHovering {
+                    Text(formatCurrencyShort(value))
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(6)
+                        .shadow(radius: 2)
+                        .offset(y: -28)
+                        .allowsHitTesting(false)
+                }
             }
             
             if !isLast {
@@ -1800,6 +1806,8 @@ struct TwoRowArrowsPipeline: View {
     let requests: [InvestmentRequest]
     let selectedTheater: String
     let selectedIndustries: Set<String>
+    let selectedQuarters: Set<String>
+    let showPriorYear: Bool
     let navigationState: NavigationState
     
     private var fiscalYears: [String] {
@@ -1808,7 +1816,10 @@ struct TwoRowArrowsPipeline: View {
         let month = calendar.component(.month, from: now)
         let year = calendar.component(.year, from: now)
         let currentFY = month >= 2 ? year + 1 : year
-        return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        if showPriorYear {
+            return ["FY\(currentFY - 1)", "FY\(currentFY)"]
+        }
+        return ["FY\(currentFY)"]
     }
     
     private func stagesForYear(_ year: String) -> [(String, Int, Double, Color, String)] {
@@ -1939,12 +1950,19 @@ struct ArrowBox: View {
             }
         }
         .onTapGesture { onTap() }
-        .popover(isPresented: .constant(isHovering), arrowEdge: .top) {
-            Text(formatCurrencyShort(value))
-                .font(.caption)
-                .fontWeight(.medium)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+        .overlay(alignment: .top) {
+            if isHovering {
+                Text(formatCurrencyShort(value))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(6)
+                    .shadow(radius: 2)
+                    .offset(y: -28)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }

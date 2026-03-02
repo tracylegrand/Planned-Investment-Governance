@@ -19,6 +19,7 @@ class DataService: ObservableObject {
     @Published var sfdcTheaters: [String] = []
     @Published var sfdcIndustries: [String] = []
     @Published var sfdcIndustriesByTheater: [String: [String]] = [:]
+    @Published var teamEmployeeIds: Set<Int> = []
     
     private let dateFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -293,6 +294,7 @@ class DataService: ObservableObject {
         self.loadAnnualBudgets { group.leave() }
         
         self.fetchTheatersAndIndustries()
+        self.loadTeamMembers()
         
         group.notify(queue: .main) {
             completion()
@@ -559,6 +561,25 @@ class DataService: ObservableObject {
                     }
                 } catch {
                     print("Error fetching theaters/industries: \(error)")
+                }
+            }
+        }.resume()
+    }
+    
+    func loadTeamMembers() {
+        guard let url = URL(string: "\(baseURL)/team-members") else { return }
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self, let data = data else { return }
+                
+                do {
+                    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    if let ids = json?["employee_ids"] as? [Int] {
+                        self.teamEmployeeIds = Set(ids)
+                    }
+                } catch {
+                    print("Error loading team members: \(error)")
                 }
             }
         }.resume()

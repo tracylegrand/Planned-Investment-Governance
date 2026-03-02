@@ -4,7 +4,7 @@ struct CacheProgress {
     var status: String = "idle"
     var currentStep: String = ""
     var stepsCompleted: Int = 0
-    var totalSteps: Int = 7
+    var totalSteps: Int = 4
     var message: String = ""
 }
 
@@ -190,106 +190,6 @@ struct InvestmentRequest: Codable, Identifiable {
     }
 }
 
-struct ApprovalStep: Codable, Identifiable {
-    let stepId: Int
-    let requestId: Int
-    let stepOrder: Int
-    let approverEmployeeId: Int?
-    let approverName: String?
-    let approverTitle: String?
-    let status: String
-    let approvedAt: String?
-    let comments: String?
-    let isFinalStep: Bool
-    
-    var id: Int { stepId }
-    
-    var isPending: Bool { status == "PENDING" }
-    var isApproved: Bool { status == "APPROVED" }
-    
-    enum CodingKeys: String, CodingKey {
-        case stepId = "STEP_ID"
-        case requestId = "REQUEST_ID"
-        case stepOrder = "STEP_ORDER"
-        case approverEmployeeId = "APPROVER_EMPLOYEE_ID"
-        case approverName = "APPROVER_NAME"
-        case approverTitle = "APPROVER_TITLE"
-        case status = "STATUS"
-        case approvedAt = "APPROVED_AT"
-        case comments = "COMMENTS"
-        case isFinalStep = "IS_FINAL_STEP"
-    }
-}
-
-struct ApprovalChainEntry: Codable {
-    let employeeId: Int
-    let name: String
-    let title: String
-    let level: Int
-    let isFinal: Bool
-    
-    enum CodingKeys: String, CodingKey {
-        case employeeId = "employee_id"
-        case name
-        case title
-        case level
-        case isFinal = "is_final"
-    }
-}
-
-struct WorkdayEmployee: Codable, Identifiable {
-    let employeeId: String
-    let name: String
-    let title: String?
-    let managerName: String?
-    let department: String?
-    
-    var id: String { employeeId }
-    
-    enum CodingKeys: String, CodingKey {
-        case employeeId = "EMPLOYEE_ID"
-        case name = "NAME"
-        case title = "TITLE"
-        case managerName = "MANAGER_NAME"
-        case department = "DEPARTMENT"
-    }
-}
-
-struct ImpersonationStatus: Codable {
-    let active: Bool
-    let employeeId: String?
-    let displayName: String?
-    let title: String?
-    
-    enum CodingKeys: String, CodingKey {
-        case active
-        case employeeId = "employee_id"
-        case displayName = "display_name"
-        case title
-    }
-    
-    init(active: Bool, employeeId: String?, displayName: String?, title: String?) {
-        self.active = active
-        self.employeeId = employeeId
-        self.displayName = displayName
-        self.title = title
-    }
-    
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        active = try container.decode(Bool.self, forKey: .active)
-        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
-        title = try container.decodeIfPresent(String.self, forKey: .title)
-        if let stringVal = try? container.decodeIfPresent(String.self, forKey: .employeeId) {
-            employeeId = stringVal
-        } else if let intVal = try? container.decodeIfPresent(Int.self, forKey: .employeeId) {
-            employeeId = String(intVal)
-        } else {
-            employeeId = nil
-        }
-    }
-}
-
 struct LinkedOpportunity: Codable, Identifiable {
     let linkId: Int
     let requestId: Int
@@ -342,7 +242,7 @@ struct SFDCAccount: Codable, Identifiable, Hashable {
     let theater: String?
     let industrySegment: String?
     
-    var id: String { "\(accountName)|\(theater ?? "")|\(industrySegment ?? "")" }
+    var id: String { accountId }
     
     enum CodingKeys: String, CodingKey {
         case accountId = "ACCOUNT_ID"
@@ -456,6 +356,103 @@ struct AnnualBudget: Codable, Identifiable {
         case q2Budget = "Q2_BUDGET"
         case q3Budget = "Q3_BUDGET"
         case q4Budget = "Q4_BUDGET"
+    }
+}
+
+struct ImpersonationStatus: Codable {
+    let active: Bool
+    let employeeId: String?
+    let displayName: String?
+    let title: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case active
+        case employeeId = "employee_id"
+        case displayName = "display_name"
+        case title
+    }
+    
+    init(active: Bool, employeeId: String?, displayName: String?, title: String?) {
+        self.active = active
+        self.employeeId = employeeId
+        self.displayName = displayName
+        self.title = title
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        active = try container.decode(Bool.self, forKey: .active)
+        if let intId = try? container.decode(Int.self, forKey: .employeeId) {
+            employeeId = String(intId)
+        } else {
+            employeeId = try container.decodeIfPresent(String.self, forKey: .employeeId)
+        }
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+    }
+}
+
+struct WorkdayEmployee: Codable, Identifiable {
+    let employeeId: String
+    let name: String
+    let title: String?
+    let managerName: String?
+    let department: String?
+    
+    var id: String { employeeId }
+    
+    enum CodingKeys: String, CodingKey {
+        case employeeId = "EMPLOYEE_ID"
+        case name = "NAME"
+        case title = "TITLE"
+        case managerName = "MANAGER_NAME"
+        case department = "DEPARTMENT"
+    }
+}
+
+struct ApprovalStep: Codable, Identifiable {
+    let stepId: Int
+    let requestId: Int
+    let stepOrder: Int
+    let approverEmployeeId: Int?
+    let approverName: String?
+    let approverTitle: String?
+    let status: String
+    let approvedAt: String?
+    let comments: String?
+    let isFinalStep: Bool
+    
+    var id: Int { stepId }
+    var isPending: Bool { status == "PENDING" }
+    var isApproved: Bool { status == "APPROVED" }
+    
+    enum CodingKeys: String, CodingKey {
+        case stepId = "STEP_ID"
+        case requestId = "REQUEST_ID"
+        case stepOrder = "STEP_ORDER"
+        case approverEmployeeId = "APPROVER_EMPLOYEE_ID"
+        case approverName = "APPROVER_NAME"
+        case approverTitle = "APPROVER_TITLE"
+        case status = "STATUS"
+        case approvedAt = "APPROVED_AT"
+        case comments = "COMMENTS"
+        case isFinalStep = "IS_FINAL_STEP"
+    }
+}
+
+struct ApprovalChainEntry: Codable {
+    let employeeId: Int
+    let name: String
+    let title: String
+    let level: Int
+    let isFinal: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case employeeId = "employee_id"
+        case name
+        case title
+        case level
+        case isFinal = "is_final"
     }
 }
 
