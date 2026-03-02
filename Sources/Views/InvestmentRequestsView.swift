@@ -455,16 +455,16 @@ struct InvestmentRequestsView: View {
                             .frame(minWidth: 150, maxWidth: .infinity, alignment: .leading)
                         
                         SortableColumnHeader(title: "Theater", column: .theater, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.theater) })
-                            .frame(width: 80, alignment: .leading)
-                        
-                        SortableColumnHeader(title: "Industry", column: .industry, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.industry) })
-                            .frame(width: 80, alignment: .leading)
-                        
-                        SortableColumnHeader(title: "Quarter", column: .quarter, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.quarter) })
                             .frame(width: 90, alignment: .leading)
                         
+                        SortableColumnHeader(title: "Industry", column: .industry, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.industry) })
+                            .frame(width: 90, alignment: .leading)
+                        
+                        SortableColumnHeader(title: "Quarter", column: .quarter, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.quarter) })
+                            .frame(width: 100, alignment: .leading)
+                        
                         SortableColumnHeader(title: "Amount", column: .amount, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.amount) })
-                            .frame(width: 90, alignment: .trailing)
+                            .frame(width: 100, alignment: .trailing)
                         
                         SortableColumnHeader(title: "Status", column: .status, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.status) })
                             .frame(width: 100, alignment: .center)
@@ -717,38 +717,38 @@ struct RequestTableRow: View {
     var body: some View {
         HStack(spacing: 0) {
             Text(request.accountName ?? "—")
-                .font(.subheadline)
+                .font(.body)
                 .lineLimit(1)
                 .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
             
             Text(request.requestTitle)
-                .font(.subheadline)
+                .font(.body)
                 .fontWeight(.medium)
                 .lineLimit(1)
                 .frame(minWidth: 150, maxWidth: .infinity, alignment: .leading)
             
             Text(request.theater ?? "—")
-                .font(.caption)
-                .frame(width: 80, alignment: .leading)
-            
-            Text(industryShortName)
-                .font(.caption)
-                .frame(width: 80, alignment: .leading)
-            
-            Text(request.investmentQuarter ?? "—")
-                .font(.caption)
+                .font(.callout)
                 .frame(width: 90, alignment: .leading)
             
+            Text(industryShortName)
+                .font(.callout)
+                .frame(width: 90, alignment: .leading)
+            
+            Text(request.investmentQuarter ?? "—")
+                .font(.callout)
+                .frame(width: 100, alignment: .leading)
+            
             Text(request.formattedAmount)
-                .font(.subheadline)
+                .font(.body)
                 .fontWeight(.medium)
-                .frame(width: 90, alignment: .trailing)
+                .frame(width: 100, alignment: .trailing)
             
             StatusBadge(status: request.status)
                 .frame(width: 100, alignment: .center)
             
             Text(request.nextApproverName ?? "—")
-                .font(.caption)
+                .font(.callout)
                 .lineLimit(1)
                 .frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
             
@@ -1066,21 +1066,21 @@ struct NewRequestView: View {
                     GroupBox("Business Case") {
                         VStack(alignment: .leading, spacing: 12) {
                             LabeledField(label: "Business Justification") {
-                                TextEditor(text: $justification)
-                                    .frame(height: 80)
-                                    .border(Color.secondary.opacity(0.3))
+                                TextField("Enter justification...", text: $justification, axis: .vertical)
+                                    .lineLimit(3...6)
+                                    .textFieldStyle(.roundedBorder)
                             }
                             
                             LabeledField(label: "Expected Outcome") {
-                                TextEditor(text: $expectedOutcome)
-                                    .frame(height: 80)
-                                    .border(Color.secondary.opacity(0.3))
+                                TextField("Enter expected outcome...", text: $expectedOutcome, axis: .vertical)
+                                    .lineLimit(3...6)
+                                    .textFieldStyle(.roundedBorder)
                             }
                             
                             LabeledField(label: "Risk Assessment") {
-                                TextEditor(text: $riskAssessment)
-                                    .frame(height: 80)
-                                    .border(Color.secondary.opacity(0.3))
+                                TextField("Enter risk assessment...", text: $riskAssessment, axis: .vertical)
+                                    .lineLimit(3...6)
+                                    .textFieldStyle(.roundedBorder)
                             }
                         }
                         .padding()
@@ -1188,10 +1188,20 @@ struct RequestDetailView: View {
     @State private var linkedOpportunities: [SFDCOpportunity] = []
     @State private var isSaving = false
     
-    // Editable fields for revise mode
+    @State private var editedTitle: String = ""
+    @State private var editedAccount: SFDCAccount?
+    @State private var accountSearchText = ""
+    @State private var searchResults: [SFDCAccount] = []
+    @State private var isSearching = false
+    @State private var editedInvestmentType: String = ""
+    @State private var editedAmount: String = ""
+    @State private var editedQuarter: String = ""
+    @State private var editedTheater: String = "US Majors"
+    @State private var editedIndustrySegment: String = ""
     @State private var editedJustification: String = ""
     @State private var editedOutcome: String = ""
     @State private var editedRisk: String = ""
+    @State private var errorMessage: String?
     
     private var isEditable: Bool {
         mode == .edit || mode == .revise
@@ -1201,14 +1211,45 @@ struct RequestDetailView: View {
         request.canWithdraw && mode == .view
     }
     
+    private let investmentTypes = ["Professional Services", "Customer Success", "Training", "Support", "Partnership", "Other"]
+    private let theaters = ["US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]
+    
+    private var availableQuarters: [String] {
+        let now = Date()
+        let calendar = Calendar.current
+        let month = calendar.component(.month, from: now)
+        let year = calendar.component(.year, from: now)
+        let (currentFY, currentQ): (Int, Int)
+        switch month {
+        case 2, 3, 4: (currentFY, currentQ) = (year + 1, 1)
+        case 5, 6, 7: (currentFY, currentQ) = (year + 1, 2)
+        case 8, 9, 10: (currentFY, currentQ) = (year + 1, 3)
+        case 11, 12: (currentFY, currentQ) = (year + 2, 4)
+        case 1: (currentFY, currentQ) = (year + 1, 4)
+        default: (currentFY, currentQ) = (year + 1, 1)
+        }
+        let previousFY = currentFY - 1
+        var quarters = (1...4).map { "FY\(previousFY)-Q\($0)" } + (1...4).map { "FY\(currentFY)-Q\($0)" }
+        if currentQ == 4 {
+            let nextFY = currentFY + 1
+            quarters += ["FY\(nextFY)-Q1", "FY\(nextFY)-Q2"]
+        }
+        return quarters
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(request.requestTitle)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                StatusBadge(status: request.status)
+                if mode == .edit {
+                    Text("Edit Investment Request")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                } else {
+                    Text(request.requestTitle)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    StatusBadge(status: request.status)
+                }
                 
                 if mode == .revise {
                     Text("(Revising)")
@@ -1222,7 +1263,7 @@ struct RequestDetailView: View {
                 
                 Spacer()
                 
-                Button("Close") { isPresented = false }
+                Button("Cancel") { isPresented = false }
                     .keyboardShortcut(.escape)
             }
             .padding()
@@ -1231,52 +1272,175 @@ struct RequestDetailView: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    GroupBox("Request Details") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            DetailRow(label: "Account", value: request.accountName ?? "—")
-                            DetailRow(label: "Investment Type", value: request.investmentType ?? "—")
-                            DetailRow(label: "Amount", value: request.formattedAmount)
-                            DetailRow(label: "Quarter", value: request.investmentQuarter ?? "—")
-                            DetailRow(label: "Theater", value: request.theater ?? "—")
-                            DetailRow(label: "Industry Segment", value: request.industrySegment ?? "—")
-                        }
-                        .padding()
-                    }
-                    
-                    GroupBox("Business Case") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            if mode == .revise {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Business Justification")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    TextEditor(text: $editedJustification)
-                                        .frame(minHeight: 80)
-                                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.3)))
+                    if mode == .edit {
+                        GroupBox("Request Details") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                LabeledField(label: "Title") {
+                                    TextField("Enter request title", text: $editedTitle)
+                                        .textFieldStyle(.roundedBorder)
                                 }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Expected Outcome")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    TextEditor(text: $editedOutcome)
-                                        .frame(minHeight: 60)
-                                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.3)))
+                                
+                                LabeledField(label: "Account") {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        if let account = editedAccount {
+                                            HStack {
+                                                Text(account.accountName)
+                                                    .padding(8)
+                                                    .background(Color.blue.opacity(0.1))
+                                                    .cornerRadius(4)
+                                                Button(action: { editedAccount = nil }) {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                .buttonStyle(.borderless)
+                                            }
+                                        } else {
+                                            TextField("Search accounts...", text: $accountSearchText)
+                                                .textFieldStyle(.roundedBorder)
+                                                .onChange(of: accountSearchText) { _, newValue in
+                                                    searchAccounts(query: newValue)
+                                                }
+                                            if !searchResults.isEmpty {
+                                                VStack(alignment: .leading, spacing: 0) {
+                                                    ForEach(searchResults.prefix(5)) { account in
+                                                        Button(action: {
+                                                            editedAccount = account
+                                                            accountSearchText = ""
+                                                            searchResults = []
+                                                            if let acctTheater = account.theater {
+                                                                editedTheater = acctTheater
+                                                            }
+                                                            if let segment = account.industrySegment {
+                                                                editedIndustrySegment = segment
+                                                            }
+                                                        }) {
+                                                            HStack {
+                                                                Text(account.accountName)
+                                                                Spacer()
+                                                                if let t = account.theater {
+                                                                    Text(t)
+                                                                        .font(.caption)
+                                                                        .foregroundColor(.secondary)
+                                                                }
+                                                            }
+                                                            .padding(8)
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                        if account.id != searchResults.prefix(5).last?.id {
+                                                            Divider()
+                                                        }
+                                                    }
+                                                }
+                                                .background(Color(NSColor.controlBackgroundColor))
+                                                .cornerRadius(4)
+                                                .shadow(radius: 2)
+                                            }
+                                        }
+                                    }
                                 }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Risk Assessment")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    TextEditor(text: $editedRisk)
-                                        .frame(minHeight: 60)
-                                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.3)))
+                                
+                                HStack(spacing: 16) {
+                                    LabeledField(label: "Investment Type") {
+                                        Picker("", selection: $editedInvestmentType) {
+                                            Text("Select...").tag("")
+                                            ForEach(investmentTypes, id: \.self) { Text($0) }
+                                        }
+                                        .labelsHidden()
+                                    }
+                                    LabeledField(label: "Amount") {
+                                        TextField("$0", text: $editedAmount)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 120)
+                                    }
                                 }
-                            } else {
-                                DetailRow(label: "Business Justification", value: request.businessJustification ?? "—")
-                                DetailRow(label: "Expected Outcome", value: request.expectedOutcome ?? "—")
-                                DetailRow(label: "Risk Assessment", value: request.riskAssessment ?? "—")
+                                
+                                HStack(spacing: 16) {
+                                    LabeledField(label: "Quarter") {
+                                        Picker("", selection: $editedQuarter) {
+                                            ForEach(availableQuarters, id: \.self) { Text($0) }
+                                        }
+                                        .labelsHidden()
+                                    }
+                                    LabeledField(label: "Theater") {
+                                        Picker("", selection: $editedTheater) {
+                                            ForEach(theaters, id: \.self) { Text($0) }
+                                        }
+                                        .labelsHidden()
+                                    }
+                                    LabeledField(label: "Industry Segment") {
+                                        TextField("Enter segment", text: $editedIndustrySegment)
+                                            .textFieldStyle(.roundedBorder)
+                                    }
+                                }
                             }
+                            .padding()
                         }
-                        .padding()
+                        
+                        GroupBox("Business Case") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                LabeledField(label: "Business Justification") {
+                                    TextField("Enter justification...", text: $editedJustification, axis: .vertical)
+                                        .lineLimit(3...6)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                                LabeledField(label: "Expected Outcome") {
+                                    TextField("Enter expected outcome...", text: $editedOutcome, axis: .vertical)
+                                        .lineLimit(3...6)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                                LabeledField(label: "Risk Assessment") {
+                                    TextField("Enter risk assessment...", text: $editedRisk, axis: .vertical)
+                                        .lineLimit(3...6)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                            }
+                            .padding()
+                        }
+                        
+                        if let error = errorMessage {
+                            Text(error)
+                                .foregroundColor(.red)
+                                .font(.caption)
+                        }
+                    } else {
+                        GroupBox("Request Details") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                DetailRow(label: "Account", value: request.accountName ?? "—")
+                                DetailRow(label: "Investment Type", value: request.investmentType ?? "—")
+                                DetailRow(label: "Amount", value: request.formattedAmount)
+                                DetailRow(label: "Quarter", value: request.investmentQuarter ?? "—")
+                                DetailRow(label: "Theater", value: request.theater ?? "—")
+                                DetailRow(label: "Industry Segment", value: request.industrySegment ?? "—")
+                            }
+                            .padding()
+                        }
+                        
+                        GroupBox("Business Case") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if mode == .revise {
+                                    LabeledField(label: "Business Justification") {
+                                        TextField("Enter justification...", text: $editedJustification, axis: .vertical)
+                                            .lineLimit(3...6)
+                                            .textFieldStyle(.roundedBorder)
+                                    }
+                                    LabeledField(label: "Expected Outcome") {
+                                        TextField("Enter expected outcome...", text: $editedOutcome, axis: .vertical)
+                                            .lineLimit(3...6)
+                                            .textFieldStyle(.roundedBorder)
+                                    }
+                                    LabeledField(label: "Risk Assessment") {
+                                        TextField("Enter risk assessment...", text: $editedRisk, axis: .vertical)
+                                            .lineLimit(3...6)
+                                            .textFieldStyle(.roundedBorder)
+                                    }
+                                } else {
+                                    DetailRow(label: "Business Justification", value: request.businessJustification ?? "—")
+                                    DetailRow(label: "Expected Outcome", value: request.expectedOutcome ?? "—")
+                                    DetailRow(label: "Risk Assessment", value: request.riskAssessment ?? "—")
+                                }
+                            }
+                            .padding()
+                        }
                     }
                     
                     if request.isRejected, let gvpComments = request.gvpComments, !gvpComments.isEmpty {
@@ -1289,59 +1453,61 @@ struct RequestDetailView: View {
                         }
                     }
                     
-                    GroupBox("Approval Status") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            DetailRow(label: "Created By", value: request.createdByName ?? "—")
-                            DetailRow(label: "Current Status", value: request.statusDisplayName)
-                            
-                            if let nextApprover = request.nextApproverName, !request.isFinalApproved && request.status != "REJECTED" {
-                                DetailRow(label: "Pending Approval", value: "\(nextApprover)\(request.nextApproverTitle != nil ? " (\(request.nextApproverTitle!))" : "")")
-                            }
-                        }
-                        .padding()
-                    }
-                    
-                    if request.dmApprovedBy != nil || request.rdApprovedBy != nil || request.avpApprovedBy != nil || request.gvpApprovedBy != nil {
-                        GroupBox("Approval History") {
-                            VStack(alignment: .leading, spacing: 16) {
-                                if let dmApprover = request.dmApprovedBy {
-                                    ApprovalHistoryRow(
-                                        level: "DM",
-                                        approverName: dmApprover,
-                                        approverTitle: request.dmApprovedByTitle,
-                                        approvedAt: request.dmApprovedAt,
-                                        comments: request.dmComments
-                                    )
-                                }
-                                if let rdApprover = request.rdApprovedBy {
-                                    ApprovalHistoryRow(
-                                        level: "RD",
-                                        approverName: rdApprover,
-                                        approverTitle: request.rdApprovedByTitle,
-                                        approvedAt: request.rdApprovedAt,
-                                        comments: request.rdComments
-                                    )
-                                }
-                                if let avpApprover = request.avpApprovedBy {
-                                    ApprovalHistoryRow(
-                                        level: "AVP",
-                                        approverName: avpApprover,
-                                        approverTitle: request.avpApprovedByTitle,
-                                        approvedAt: request.avpApprovedAt,
-                                        comments: request.avpComments
-                                    )
-                                }
-                                if let gvpApprover = request.gvpApprovedBy {
-                                    ApprovalHistoryRow(
-                                        level: "GVP/Final",
-                                        approverName: gvpApprover,
-                                        approverTitle: request.gvpApprovedByTitle,
-                                        approvedAt: request.gvpApprovedAt,
-                                        comments: request.gvpComments
-                                    )
+                    if mode != .edit {
+                        GroupBox("Approval Status") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                DetailRow(label: "Created By", value: request.createdByName ?? "—")
+                                DetailRow(label: "Current Status", value: request.statusDisplayName)
+                                
+                                if let nextApprover = request.nextApproverName, !request.isFinalApproved && request.status != "REJECTED" {
+                                    DetailRow(label: "Pending Approval", value: "\(nextApprover)\(request.nextApproverTitle != nil ? " (\(request.nextApproverTitle!))" : "")")
                                 }
                             }
                             .padding()
+                        }
+                        
+                        if request.dmApprovedBy != nil || request.rdApprovedBy != nil || request.avpApprovedBy != nil || request.gvpApprovedBy != nil {
+                            GroupBox("Approval History") {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    if let dmApprover = request.dmApprovedBy {
+                                        ApprovalHistoryRow(
+                                            level: "DM",
+                                            approverName: dmApprover,
+                                            approverTitle: request.dmApprovedByTitle,
+                                            approvedAt: request.dmApprovedAt,
+                                            comments: request.dmComments
+                                        )
+                                    }
+                                    if let rdApprover = request.rdApprovedBy {
+                                        ApprovalHistoryRow(
+                                            level: "RD",
+                                            approverName: rdApprover,
+                                            approverTitle: request.rdApprovedByTitle,
+                                            approvedAt: request.rdApprovedAt,
+                                            comments: request.rdComments
+                                        )
+                                    }
+                                    if let avpApprover = request.avpApprovedBy {
+                                        ApprovalHistoryRow(
+                                            level: "AVP",
+                                            approverName: avpApprover,
+                                            approverTitle: request.avpApprovedByTitle,
+                                            approvedAt: request.avpApprovedAt,
+                                            comments: request.avpComments
+                                        )
+                                    }
+                                    if let gvpApprover = request.gvpApprovedBy {
+                                        ApprovalHistoryRow(
+                                            level: "GVP/Final",
+                                            approverName: gvpApprover,
+                                            approverTitle: request.gvpApprovedByTitle,
+                                            approvedAt: request.gvpApprovedAt,
+                                            comments: request.gvpComments
+                                        )
+                                    }
+                                }
+                                .padding()
+                            }
                         }
                     }
                     
@@ -1370,7 +1536,19 @@ struct RequestDetailView: View {
             Divider()
             
             HStack {
-                if mode == .revise {
+                if mode == .edit {
+                    Button("Save Draft") {
+                        saveEdit(submit: false)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(editedTitle.isEmpty || isSaving)
+                    
+                    Button("Submit for Approval") {
+                        saveEdit(submit: true)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(editedTitle.isEmpty || isSaving)
+                } else if mode == .revise {
                     Button("Save as Draft") {
                         saveRevision(submit: false)
                     }
@@ -1382,11 +1560,6 @@ struct RequestDetailView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isSaving)
-                } else if mode == .edit && request.isEditable {
-                    Button("Submit for Approval") {
-                        showingSubmitConfirm = true
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
                 
                 if canWithdraw {
@@ -1405,26 +1578,28 @@ struct RequestDetailView: View {
             }
             .padding()
         }
-        .frame(width: 600, height: 650)
+        .frame(width: 700, height: 700)
         .onAppear {
+            editedTitle = request.requestTitle
+            if let name = request.accountName {
+                editedAccount = SFDCAccount(accountId: request.accountId ?? "", accountName: name, theater: request.theater, industrySegment: request.industrySegment)
+            }
+            editedInvestmentType = request.investmentType ?? ""
+            if let amt = request.requestedAmount {
+                let formatter = NumberFormatter()
+                formatter.numberStyle = .decimal
+                formatter.maximumFractionDigits = 0
+                editedAmount = "$\(formatter.string(from: NSNumber(value: amt)) ?? "\(Int(amt))")"
+            }
+            editedQuarter = request.investmentQuarter ?? ""
+            editedTheater = request.theater ?? "US Majors"
+            editedIndustrySegment = request.industrySegment ?? ""
             editedJustification = request.businessJustification ?? ""
             editedOutcome = request.expectedOutcome ?? ""
             editedRisk = request.riskAssessment ?? ""
             dataService.loadLinkedOpportunities(for: request.requestId) { opps in
                 linkedOpportunities = opps
             }
-        }
-        .alert("Submit Request", isPresented: $showingSubmitConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Submit") {
-                dataService.submitRequest(requestId: request.requestId) { success, error in
-                    if success {
-                        isPresented = false
-                    }
-                }
-            }
-        } message: {
-            Text("Submit this request for approval? Once submitted, it cannot be edited unless withdrawn.")
         }
         .alert("Withdraw Request", isPresented: $showingWithdrawConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -1437,6 +1612,46 @@ struct RequestDetailView: View {
             }
         } message: {
             Text("Withdraw this request back to Draft status? This will clear approvals from the current level forward.")
+        }
+    }
+    
+    private func searchAccounts(query: String) {
+        guard query.count >= 2 else {
+            searchResults = []
+            return
+        }
+        isSearching = true
+        dataService.searchAccounts(query: query) { accounts, _ in
+            isSearching = false
+            searchResults = accounts
+        }
+    }
+    
+    private func saveEdit(submit: Bool) {
+        isSaving = true
+        errorMessage = nil
+        let amountValue = Double(editedAmount.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: ""))
+        dataService.updateRequest(
+            requestId: request.requestId,
+            title: editedTitle,
+            accountId: editedAccount?.accountId,
+            accountName: editedAccount?.accountName,
+            investmentType: editedInvestmentType.isEmpty ? nil : editedInvestmentType,
+            amount: amountValue,
+            quarter: editedQuarter,
+            justification: editedJustification.isEmpty ? nil : editedJustification,
+            expectedOutcome: editedOutcome.isEmpty ? nil : editedOutcome,
+            riskAssessment: editedRisk.isEmpty ? nil : editedRisk,
+            theater: editedTheater,
+            industrySegment: editedIndustrySegment.isEmpty ? nil : editedIndustrySegment,
+            autoSubmit: submit
+        ) { success in
+            isSaving = false
+            if success {
+                isPresented = false
+            } else {
+                errorMessage = "Failed to save request. Please try again."
+            }
         }
     }
     

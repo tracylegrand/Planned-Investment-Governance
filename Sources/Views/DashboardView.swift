@@ -527,13 +527,41 @@ struct DashboardView: View {
                 Spacer()
                 
                 if let user = dataService.currentUser {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(user.displayName)
-                            .font(.headline)
-                        if let title = user.title {
-                            Text(title)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                    if dataService.impersonationStatus.active {
+                        HStack(spacing: 6) {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(user.displayName)
+                                    .font(.headline)
+                                    .foregroundColor(.orange)
+                                if let title = user.title {
+                                    Text(title)
+                                        .font(.subheadline)
+                                        .foregroundColor(.orange.opacity(0.8))
+                                }
+                            }
+                            Button(action: {
+                                dataService.stopImpersonating { _ in }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.orange)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.orange, lineWidth: 1.5)
+                        )
+                    } else {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(user.displayName)
+                                .font(.headline)
+                            if let title = user.title {
+                                Text(title)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                     

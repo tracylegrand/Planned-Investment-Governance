@@ -137,9 +137,10 @@ struct QuarterlyFinancialTable: View {
     let rows: [FinancialRow]
     let fiscalYear: String
 
-    private let nameWidth: CGFloat = 220
-    private let colWidth: CGFloat = 100
-    private let colSpacing: CGFloat = 2
+    private let nameWidth: CGFloat = 240
+    private let colWidth: CGFloat = 110
+    private let colSpacing: CGFloat = 4
+    private let barHeight: CGFloat = 22
 
     private func formatCurrency(_ amount: Double) -> String {
         let formatter = NumberFormatter()
@@ -160,82 +161,117 @@ struct QuarterlyFinancialTable: View {
         return ("$\(formatter.string(from: NSNumber(value: amount)) ?? "0")", false)
     }
 
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 0) {
-                    Text("Theater / Industry")
-                        .font(.headline)
-                        .fontWeight(.bold)
-                        .frame(width: nameWidth, alignment: .leading)
+    private func maxBudget() -> Double {
+        rows.filter { $0.isTheater }.map { max($0.fyTotal.budget, $0.fyTotal.approved) }.max() ?? 1
+    }
 
-                    ForEach(["Q1", "Q2", "Q3", "Q4", "FY Total"], id: \.self) { label in
-                        VStack(spacing: 2) {
-                            Text(label)
-                                .font(.caption)
-                                .fontWeight(.bold)
-                            HStack(spacing: colSpacing) {
-                                Text("Appr.")
-                                    .font(.caption2)
-                                    .fontWeight(.semibold)
-                                    .frame(width: colWidth, alignment: .trailing)
-                                Text("Budg.")
-                                    .font(.caption2)
-                                    .fontWeight(.semibold)
-                                    .frame(width: colWidth, alignment: .trailing)
-                                Text("Rem.")
-                                    .font(.caption2)
-                                    .fontWeight(.semibold)
-                                    .frame(width: colWidth, alignment: .trailing)
-                            }
-                        }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 4)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 3)
-                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                }
-                .padding(.bottom, 6)
+    private func barWidth(amount: Double, maxVal: Double) -> CGFloat {
+        guard maxVal > 0 else { return 0 }
+        return CGFloat(min(amount / maxVal, 1.0)) * (colWidth - 4)
+    }
+
+    @ViewBuilder
+    private func barCell(amount: Double, color: Color, maxVal: Double, text: String, isBold: Bool) -> some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color.opacity(0.2))
+                    .frame(width: barWidth(amount: abs(amount), maxVal: maxVal), height: barHeight)
+                Spacer(minLength: 0)
+            }
+            Text(text)
+                .font(.system(.callout, design: .monospaced))
+                .fontWeight(isBold ? .bold : .regular)
+                .padding(.trailing, 2)
+        }
+        .frame(width: colWidth, height: barHeight)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Theater / Industry")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .frame(height: 40, alignment: .bottomLeading)
+                    .padding(.bottom, 6)
 
                 Divider().padding(.bottom, 4)
 
                 ForEach(rows) { row in
                     HStack(spacing: 0) {
-                        HStack(spacing: 0) {
-                            if !row.isTheater {
-                                Spacer().frame(width: 16)
-                            }
-                            Text(row.name)
-                                .font(row.isTheater ? .subheadline : .caption)
-                                .fontWeight(row.isTheater ? .bold : .regular)
-                                .lineLimit(1)
+                        if !row.isTheater {
+                            Spacer().frame(width: 20)
                         }
-                        .frame(width: nameWidth, alignment: .leading)
-
-                        ForEach(Array(zip(["Q1","Q2","Q3","Q4","FYT"], [row.q1, row.q2, row.q3, row.q4, row.fyTotal])), id: \.0) { _, qd in
-                            let rem = formatRemaining(qd.remaining)
-                            HStack(spacing: colSpacing) {
-                                Text(formatCurrency(qd.approved))
-                                    .frame(width: colWidth, alignment: .trailing)
-                                Text(formatCurrency(qd.budget))
-                                    .frame(width: colWidth, alignment: .trailing)
-                                Text(rem.text)
-                                    .foregroundColor(rem.isNegative ? .red : .primary)
-                                    .frame(width: colWidth, alignment: .trailing)
-                            }
-                            .font(.system(.caption, design: .monospaced))
+                        Text(row.name)
+                            .font(row.isTheater ? .body : .callout)
                             .fontWeight(row.isTheater ? .bold : .regular)
-                            .padding(.horizontal, 4)
-                        }
+                            .lineLimit(1)
                     }
+                    .frame(width: nameWidth, height: barHeight, alignment: .leading)
                     .padding(.vertical, row.isTheater ? 4 : 2)
                     .background(row.isTheater ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color.clear)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .frame(width: nameWidth)
+            .padding(.leading, 8)
+
+            Divider()
+
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 0) {
+                        ForEach(["Q1", "Q2", "Q3", "Q4", "FY Total"], id: \.self) { label in
+                            VStack(spacing: 2) {
+                                Text(label)
+                                    .font(.subheadline)
+                                    .fontWeight(.bold)
+                                HStack(spacing: colSpacing) {
+                                    Text("Approved")
+                                        .frame(width: colWidth, alignment: .trailing)
+                                    Text("Budget")
+                                        .frame(width: colWidth, alignment: .trailing)
+                                    Text("Remaining")
+                                        .frame(width: colWidth, alignment: .trailing)
+                                }
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 4)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .padding(.bottom, 6)
+
+                    Divider().padding(.bottom, 4)
+
+                    let globalMax = maxBudget()
+
+                    ForEach(rows) { row in
+                        HStack(spacing: 0) {
+                            ForEach(Array(zip(["Q1","Q2","Q3","Q4","FYT"], [row.q1, row.q2, row.q3, row.q4, row.fyTotal])), id: \.0) { _, qd in
+                                let rem = formatRemaining(qd.remaining)
+                                HStack(spacing: colSpacing) {
+                                    barCell(amount: qd.approved, color: .green, maxVal: globalMax, text: formatCurrency(qd.approved), isBold: row.isTheater)
+                                    barCell(amount: qd.budget, color: .blue, maxVal: globalMax, text: formatCurrency(qd.budget), isBold: row.isTheater)
+                                    barCell(amount: abs(qd.remaining), color: rem.isNegative ? .red : .green, maxVal: globalMax, text: rem.text, isBold: row.isTheater)
+                                        .foregroundColor(rem.isNegative ? .red : .primary)
+                                }
+                                .padding(.horizontal, 4)
+                            }
+                        }
+                        .padding(.vertical, row.isTheater ? 4 : 2)
+                        .background(row.isTheater ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color.clear)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
+            }
         }
     }
 }

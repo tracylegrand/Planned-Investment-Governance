@@ -294,7 +294,9 @@ class DataService: ObservableObject {
         self.loadAnnualBudgets { group.leave() }
         
         self.fetchTheatersAndIndustries()
-        self.loadTeamMembers()
+        
+        group.enter()
+        self.loadTeamMembers { group.leave() }
         
         group.notify(queue: .main) {
             completion()
@@ -566,12 +568,18 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    func loadTeamMembers() {
-        guard let url = URL(string: "\(baseURL)/team-members") else { return }
+    func loadTeamMembers(completion: (() -> Void)? = nil) {
+        guard let url = URL(string: "\(baseURL)/team-members") else {
+            completion?()
+            return
+        }
         
         session.dataTask(with: url) { [weak self] data, response, error in
             DispatchQueue.main.async {
-                guard let self = self, let data = data else { return }
+                guard let self = self, let data = data else {
+                    completion?()
+                    return
+                }
                 
                 do {
                     let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -581,6 +589,7 @@ class DataService: ObservableObject {
                 } catch {
                     print("Error loading team members: \(error)")
                 }
+                completion?()
             }
         }.resume()
     }
@@ -1053,10 +1062,17 @@ class DataService: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    self.loadCurrentUser {}
                     self.checkImpersonationStatus()
+                    let group = DispatchGroup()
+                    group.enter()
+                    self.loadCurrentUser { group.leave() }
+                    group.enter()
+                    self.loadTeamMembers { group.leave() }
                     self.loadSummary()
                     self.loadInvestmentRequests()
+                    group.notify(queue: .main) {
+                        self.objectWillChange.send()
+                    }
                     completion(true)
                 } else {
                     completion(false)
@@ -1079,9 +1095,16 @@ class DataService: ObservableObject {
                 guard let self = self else { return }
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     self.impersonationStatus = ImpersonationStatus(active: false, employeeId: nil, displayName: nil, title: nil)
-                    self.loadCurrentUser {}
+                    let group = DispatchGroup()
+                    group.enter()
+                    self.loadCurrentUser { group.leave() }
+                    group.enter()
+                    self.loadTeamMembers { group.leave() }
                     self.loadSummary()
                     self.loadInvestmentRequests()
+                    group.notify(queue: .main) {
+                        self.objectWillChange.send()
+                    }
                     completion(true)
                 } else {
                     completion(false)
