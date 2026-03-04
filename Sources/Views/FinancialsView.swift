@@ -25,6 +25,34 @@ struct FinancialsView: View {
     @ObservedObject var userSettings = UserSettings.shared
     @EnvironmentObject var dataService: DataService
 
+    @State private var selectedTheater: String = "All"
+    @State private var selectedIndustries: Set<String> = []
+    @State private var showIndustryPicker = false
+
+    private var theaters: [String] {
+        ["All"] + dataService.sfdcTheaters
+    }
+
+    private var portfoliosByTheater: [String: [String]] {
+        dataService.sfdcIndustriesByTheater
+    }
+
+    private var availablePortfolios: [String] {
+        if selectedTheater == "All" {
+            return Array(Set(portfoliosByTheater.values.flatMap { $0 })).sorted()
+        }
+        return portfoliosByTheater[selectedTheater] ?? []
+    }
+
+    private var hasActiveFilters: Bool {
+        selectedTheater != "All" || !selectedIndustries.isEmpty
+    }
+
+    private func clearAllFilters() {
+        selectedTheater = "All"
+        selectedIndustries = []
+    }
+
     private var currentFY: Int {
         let calendar = Calendar.current
         let now = Date()
@@ -45,13 +73,41 @@ struct FinancialsView: View {
         let approvedRequests = dataService.investmentRequests.filter { $0.status == "FINAL_APPROVED" }
         let budgetsForYear = dataService.annualBudgets.filter { $0.fiscalYear == fy }
 
-        let allTheaters = Set(budgetsForYear.map { TheaterMapping.normalizeTheater($0.theater) }).sorted()
+        let fyQuarters = (1...4).map { "\(fy)-Q\($0)" }
+        let fyApproved = approvedRequests.filter { fyQuarters.contains($0.investmentQuarter ?? "") }
+
+        var theaterIndustries: [String: Set<String>] = [:]
+        for b in budgetsForYear {
+            let t = TheaterMapping.normalizeTheater(b.theater)
+            theaterIndustries[t, default: []].insert(b.industrySegment)
+        }
+        for r in fyApproved {
+            let t = TheaterMapping.normalizeTheater(r.theater ?? "")
+            if !t.isEmpty {
+                let ind = r.industrySegment ?? ""
+                theaterIndustries[t, default: []].insert(ind)
+            }
+        }
+
+        for t in theaterIndustries.keys {
+            for seg in (dataService.sfdcIndustriesByTheater[t] ?? []) {
+                theaterIndustries[t, default: []].insert(seg)
+            }
+        }
+
+        var allTheaters = theaterIndustries.keys.sorted()
+        if selectedTheater != "All" {
+            allTheaters = allTheaters.filter { $0 == selectedTheater }
+        }
 
         var rows: [FinancialRow] = []
         for theater in allTheaters {
             let dbCodes = TheaterMapping.dbCodes(forDisplayName: theater)
             let theaterBudgets = budgetsForYear.filter { TheaterMapping.normalizeTheater($0.theater) == theater }
-            let allIndustries = Set(theaterBudgets.map { $0.industrySegment }).sorted()
+            var allIndustries = (theaterIndustries[theater] ?? []).sorted()
+            if !selectedIndustries.isEmpty {
+                allIndustries = allIndustries.filter { selectedIndustries.contains($0) }
+            }
 
             guard !allIndustries.isEmpty else { continue }
 
@@ -65,7 +121,8 @@ struct FinancialsView: View {
                 let q3b = budgets.map { $0.q3Budget }.reduce(0, +)
                 let q4b = budgets.map { $0.q4Budget }.reduce(0, +)
 
-                let indRequests = approvedRequests.filter { dbCodes.contains($0.theater ?? "") && $0.industrySegment == industry }
+                let indRequests: [InvestmentRequest]
+                indRequests = approvedRequests.filter { dbCodes.contains($0.theater ?? "") && $0.industrySegment == industry }
                 let q1a = indRequests.filter { $0.investmentQuarter == "\(fy)-Q1" }.compactMap { $0.requestedAmount }.reduce(0, +)
                 let q2a = indRequests.filter { $0.investmentQuarter == "\(fy)-Q2" }.compactMap { $0.requestedAmount }.reduce(0, +)
                 let q3a = indRequests.filter { $0.investmentQuarter == "\(fy)-Q3" }.compactMap { $0.requestedAmount }.reduce(0, +)
@@ -102,6 +159,108 @@ struct FinancialsView: View {
 
             Divider()
 
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Theater").font(.caption).foregroundColor(.secondary)
+                    Picker("Theater", selection: $selectedTheater) {
+                        ForEach(theaters, id: \.self) { Text($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Region").font(.caption).foregroundColor(.secondary)
+                    Button {
+                        showIndustryPicker.toggle()
+                    } label: {
+                        HStack {
+                            Text(selectedIndustries.isEmpty ? "All Regions" : "\(selectedIndustries.count) Selected")
+                            Image(systemName: "chevron.down")
+                        }
+                        .frame(width: 140)
+                    }
+                    .disabled(availablePortfolios.isEmpty)
+                }
+                .popover(isPresented: $showIndustryPicker, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Select Portfolios")
+                                .font(.headline)
+                            Spacer()
+                            Button("Clear") {
+                                selectedIndustries.removeAll()
+                            }
+                            .disabled(selectedIndustries.isEmpty)
+                            Button("Done") {
+                                showIndustryPicker = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                        .padding(.bottom, 4)
+
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button {
+                                if selectedIndustries.count == availablePortfolios.count {
+                                    selectedIndustries.removeAll()
+                                } else {
+                                    selectedIndustries = Set(availablePortfolios)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: selectedIndustries.count == availablePortfolios.count ? "checkmark.square.fill" : "square")
+                                        .foregroundColor(selectedIndustries.count == availablePortfolios.count ? .blue : .secondary)
+                                    Text("All")
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+
+                            ForEach(availablePortfolios, id: \.self) { industry in
+                                Button {
+                                    if selectedIndustries.contains(industry) {
+                                        selectedIndustries.remove(industry)
+                                    } else {
+                                        selectedIndustries.insert(industry)
+                                    }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: selectedIndustries.contains(industry) ? "checkmark.square.fill" : "square")
+                                            .foregroundColor(selectedIndustries.contains(industry) ? .blue : .secondary)
+                                        Text(industry)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                    }
+                                    .padding(.leading, 16)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding()
+                    .frame(width: 320)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(" ").font(.caption)
+                    Button(action: clearAllFilters) {
+                        Text("Clear")
+                    }
+                    .disabled(!hasActiveFilters)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
+
+            Divider()
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(fiscalYears, id: \.self) { fy in
@@ -129,6 +288,9 @@ struct FinancialsView: View {
                 }
                 .padding(.vertical)
             }
+        }
+        .onChange(of: selectedTheater) { _ in
+            selectedIndustries = []
         }
     }
 }
@@ -190,7 +352,7 @@ struct QuarterlyFinancialTable: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Theater / Industry")
+                Text("Theater / Region")
                     .font(.headline)
                     .fontWeight(.bold)
                     .frame(height: 40, alignment: .bottomLeading)
@@ -227,7 +389,7 @@ struct QuarterlyFinancialTable: View {
                                     .font(.subheadline)
                                     .fontWeight(.bold)
                                 HStack(spacing: colSpacing) {
-                                    Text("Approved")
+                                    Text("Approved for IC")
                                         .frame(width: colWidth, alignment: .trailing)
                                     Text("Budget")
                                         .frame(width: colWidth, alignment: .trailing)

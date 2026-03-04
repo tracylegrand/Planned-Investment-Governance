@@ -47,6 +47,7 @@ class UserSettings: ObservableObject {
 struct SettingsView: View {
     @ObservedObject var settings = UserSettings.shared
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var dataService: DataService
     
     @State private var tempDefaultTheater: String
     @State private var tempDefaultPortfolios: Set<String>
@@ -59,14 +60,19 @@ struct SettingsView: View {
     @State private var tempShowPriorYear: Bool
     @State private var showPortfolioPicker = false
     
-    private let theaters = TheaterMapping.allTheaters
     private let quarterOptions = ["Current Quarter", "Current Fiscal Year", "All Quarters"]
     
-    private let portfoliosByTheater = TheaterMapping.portfoliosByTheater
+    private var theaters: [String] {
+        ["All"] + dataService.sfdcTheaters
+    }
+    
+    private var portfoliosByTheater: [String: [String]] {
+        dataService.sfdcIndustriesByTheater
+    }
     
     private var availablePortfolios: [String] {
         if tempDefaultTheater == "All" {
-            return portfoliosByTheater.values.flatMap { $0 }.sorted()
+            return Array(Set(portfoliosByTheater.values.flatMap { $0 })).sorted()
         }
         return portfoliosByTheater[tempDefaultTheater] ?? []
     }
@@ -118,7 +124,7 @@ struct SettingsView: View {
                     }
                     
                     HStack {
-                        Text("Default Portfolio(s)")
+                        Text("Default Region(s)")
                         Spacer()
                         Button(action: { showPortfolioPicker.toggle() }) {
                             HStack(spacing: 4) {
@@ -373,13 +379,17 @@ struct DashboardView: View {
         return "FY\(fiscalYear)-Q\(quarter)"
     }
     
-    private let theaters = TheaterMapping.allTheaters
+    private var theaters: [String] {
+        ["All"] + dataService.sfdcTheaters
+    }
     
-    private let portfoliosByTheater = TheaterMapping.portfoliosByTheater
+    private var portfoliosByTheater: [String: [String]] {
+        dataService.sfdcIndustriesByTheater
+    }
     
     private var availablePortfolios: [String] {
         if selectedTheater == "All" {
-            return portfoliosByTheater.values.flatMap { $0 }.sorted()
+            return Array(Set(portfoliosByTheater.values.flatMap { $0 })).sorted()
         }
         return portfoliosByTheater[selectedTheater] ?? []
     }
@@ -431,7 +441,13 @@ struct DashboardView: View {
     var filteredRequests: [InvestmentRequest] {
         dataService.investmentRequests.filter { request in
             let matchesTheater = selectedTheater == "All" || TheaterMapping.dbCodes(forDisplayName: selectedTheater).contains(request.theater ?? "")
-            let matchesIndustry = selectedIndustries.isEmpty || selectedIndustries.contains(request.industrySegment ?? "")
+            let matchesIndustry: Bool
+            if selectedIndustries.isEmpty {
+                matchesIndustry = true
+            } else {
+                let seg = request.industrySegment ?? ""
+                matchesIndustry = selectedIndustries.contains(seg)
+            }
             let matchesQuarter: Bool
             if selectedQuarters.isEmpty {
                 matchesQuarter = true
@@ -597,21 +613,28 @@ struct DashboardView: View {
             }
                 
                 HStack(spacing: 12) {
-                    Picker("Theater", selection: $selectedTheater) {
-                        ForEach(theaters, id: \.self) { Text($0) }
-                    }
-                    .frame(width: 180)
-                    
-                    Button {
-                        showIndustryPicker.toggle()
-                    } label: {
-                        HStack {
-                            Text(selectedIndustries.isEmpty ? "All Portfolios" : "\(selectedIndustries.count) Selected")
-                            Image(systemName: "chevron.down")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Theater").font(.caption).foregroundColor(.secondary)
+                        Picker("Theater", selection: $selectedTheater) {
+                            ForEach(theaters, id: \.self) { Text($0) }
                         }
-                        .frame(width: 140)
+                        .labelsHidden()
+                        .frame(width: 180)
                     }
-                    .disabled(availablePortfolios.isEmpty)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Region").font(.caption).foregroundColor(.secondary)
+                        Button {
+                            showIndustryPicker.toggle()
+                        } label: {
+                            HStack {
+                                Text(selectedIndustries.isEmpty ? "All Regions" : "\(selectedIndustries.count) Selected")
+                                Image(systemName: "chevron.down")
+                            }
+                            .frame(width: 140)
+                        }
+                        .disabled(availablePortfolios.isEmpty)
+                    }
                     .popover(isPresented: $showIndustryPicker, arrowEdge: .bottom) {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -676,14 +699,17 @@ struct DashboardView: View {
                         .frame(width: 320)
                     }
                     
-                    Button {
-                        showQuarterPicker.toggle()
-                    } label: {
-                        HStack {
-                            Text(selectedQuarters.isEmpty ? "All Quarters" : "\(selectedQuarters.count) Selected")
-                            Image(systemName: "chevron.down")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Quarters").font(.caption).foregroundColor(.secondary)
+                        Button {
+                            showQuarterPicker.toggle()
+                        } label: {
+                            HStack {
+                                Text(selectedQuarters.isEmpty ? "All Quarters" : "\(selectedQuarters.count) Selected")
+                                Image(systemName: "chevron.down")
+                            }
+                            .frame(width: 120)
                         }
-                        .frame(width: 120)
                     }
                     .popover(isPresented: $showQuarterPicker, arrowEdge: .bottom) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -766,15 +792,22 @@ struct DashboardView: View {
                         .frame(width: 200)
                     }
                     
-                    Picker("Status", selection: $selectedStatus) {
-                        ForEach(statuses, id: \.self) { Text($0) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Status").font(.caption).foregroundColor(.secondary)
+                        Picker("Status", selection: $selectedStatus) {
+                            ForEach(statuses, id: \.self) { Text($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 150)
                     }
-                    .frame(width: 150)
                     
-                    Button(action: clearAllFilters) {
-                        Text("Clear")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(" ").font(.caption)
+                        Button(action: clearAllFilters) {
+                            Text("Clear")
+                        }
+                        .disabled(!hasActiveFilters)
                     }
-                    .disabled(!hasActiveFilters)
                     
                     Spacer()
                 }
@@ -1002,7 +1035,7 @@ struct DashboardView: View {
         case "DM_APPROVED": return "DM Approved"
         case "RD_APPROVED": return "RD Approved"
         case "AVP_APPROVED": return "AVP Approved"
-        case "FINAL_APPROVED": return "Final Approved"
+        case "FINAL_APPROVED": return "Approved for IC"
         case "REJECTED": return "Rejected"
         default: return status
         }
@@ -1015,6 +1048,7 @@ struct DashboardView: View {
         case "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED": return .blue
         case "FINAL_APPROVED": return .green
         case "REJECTED": return .red
+        case "CANCELLED": return .secondary
         default: return .gray
         }
     }
@@ -1178,7 +1212,7 @@ struct ApprovalPipelineView: View {
             ("RD Review", yearRequests.filter { $0.status == "RD_APPROVED" }.count, yearRequests.filter { $0.status == "RD_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +)),
             ("AVP Review", yearRequests.filter { $0.status == "AVP_APPROVED" }.count, yearRequests.filter { $0.status == "AVP_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +)),
             ("Rejected", yearRequests.filter { $0.status == "REJECTED" }.count, yearRequests.filter { $0.status == "REJECTED" }.compactMap { $0.requestedAmount }.reduce(0, +)),
-            ("Approved", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +))
+            ("Approved for IC", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +))
         ]
     }
     
@@ -1247,7 +1281,7 @@ struct ApprovalPipelineView: View {
         case "DM Review": return "DM_APPROVED"
         case "RD Review": return "RD_APPROVED"
         case "AVP Review": return "AVP_APPROVED"
-        case "Approved": return "FINAL_APPROVED"
+        case "Approved for IC": return "FINAL_APPROVED"
         default: return "All"
         }
     }
@@ -1257,7 +1291,7 @@ struct ApprovalPipelineView: View {
         case "Draft": return .gray
         case "Submitted": return .orange
         case "DM Review", "RD Review", "AVP Review": return .blue
-        case "Approved": return .green
+        case "Approved for IC": return .green
         default: return .gray
         }
     }
@@ -1367,8 +1401,9 @@ struct StatusBadge: View {
         case "DM_APPROVED": return "DM Approved"
         case "RD_APPROVED": return "RD Approved"
         case "AVP_APPROVED": return "AVP Approved"
-        case "FINAL_APPROVED": return "Approved"
+        case "FINAL_APPROVED": return "Approved for IC"
         case "REJECTED": return "Rejected"
+        case "CANCELLED": return "Cancelled"
         default: return status
         }
     }
@@ -1380,6 +1415,7 @@ struct StatusBadge: View {
         case "DM_APPROVED", "RD_APPROVED", "AVP_APPROVED": return .blue.opacity(0.2)
         case "FINAL_APPROVED": return .green.opacity(0.2)
         case "REJECTED": return .red.opacity(0.2)
+        case "CANCELLED": return .gray.opacity(0.3)
         default: return .gray.opacity(0.2)
         }
     }
@@ -1426,7 +1462,7 @@ struct HorizontalFlowPipeline: View {
             ("RD", yearRequests.filter { $0.status == "RD_APPROVED" }.count, yearRequests.filter { $0.status == "RD_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "RD_APPROVED"),
             ("AVP", yearRequests.filter { $0.status == "AVP_APPROVED" }.count, yearRequests.filter { $0.status == "AVP_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "AVP_APPROVED"),
             ("Rejected", yearRequests.filter { $0.status == "REJECTED" }.count, yearRequests.filter { $0.status == "REJECTED" }.compactMap { $0.requestedAmount }.reduce(0, +), .red, "REJECTED"),
-            ("Approved", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
+            ("Approved for IC", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
         ]
     }
     
@@ -1569,7 +1605,7 @@ struct CompactPillPipeline: View {
             ("RD", yearRequests.filter { $0.status == "RD_APPROVED" }.count, yearRequests.filter { $0.status == "RD_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "RD_APPROVED"),
             ("AVP", yearRequests.filter { $0.status == "AVP_APPROVED" }.count, yearRequests.filter { $0.status == "AVP_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "AVP_APPROVED"),
             ("Reject", yearRequests.filter { $0.status == "REJECTED" }.count, yearRequests.filter { $0.status == "REJECTED" }.compactMap { $0.requestedAmount }.reduce(0, +), .red, "REJECTED"),
-            ("Approv", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
+            ("IC Appr", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
         ]
     }
     
@@ -1708,7 +1744,7 @@ struct StepperPipeline: View {
             ("RD", yearRequests.filter { $0.status == "RD_APPROVED" }.count, yearRequests.filter { $0.status == "RD_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "RD_APPROVED"),
             ("AVP", yearRequests.filter { $0.status == "AVP_APPROVED" }.count, yearRequests.filter { $0.status == "AVP_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "AVP_APPROVED"),
             ("Reject", yearRequests.filter { $0.status == "REJECTED" }.count, yearRequests.filter { $0.status == "REJECTED" }.compactMap { $0.requestedAmount }.reduce(0, +), .red, "REJECTED"),
-            ("Approv", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
+            ("IC Appr", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
         ]
     }
     
@@ -1859,7 +1895,7 @@ struct TwoRowArrowsPipeline: View {
             ("RD Review", yearRequests.filter { $0.status == "RD_APPROVED" }.count, yearRequests.filter { $0.status == "RD_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "RD_APPROVED"),
             ("AVP Review", yearRequests.filter { $0.status == "AVP_APPROVED" }.count, yearRequests.filter { $0.status == "AVP_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .blue, "AVP_APPROVED"),
             ("Rejected", yearRequests.filter { $0.status == "REJECTED" }.count, yearRequests.filter { $0.status == "REJECTED" }.compactMap { $0.requestedAmount }.reduce(0, +), .red, "REJECTED"),
-            ("Approved", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
+            ("Approved for IC", yearRequests.filter { $0.status == "FINAL_APPROVED" }.count, yearRequests.filter { $0.status == "FINAL_APPROVED" }.compactMap { $0.requestedAmount }.reduce(0, +), .green, "FINAL_APPROVED")
         ]
     }
     

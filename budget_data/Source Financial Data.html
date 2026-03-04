@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Source Financial Data — Planned Investment Governance</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 20px; color: #333; }
+  h1 { border-bottom: 2px solid #2196f3; padding-bottom: 8px; }
+  h2 { color: #1565c0; margin-top: 32px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: right; }
+  th { background: #f5f5f5; font-weight: 600; }
+  td:first-child, th:first-child { text-align: left; }
+  tr:nth-child(even) { background: #fafafa; }
+  .total-row { font-weight: bold; background: #e3f2fd !important; }
+  .meta { color: #666; font-size: 0.9em; margin: 4px 0; }
+  .mapping { background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; padding: 12px 16px; margin: 16px 0; }
+  .mapping dt { font-weight: 600; }
+  .mapping dd { margin: 0 0 8px 16px; }
+</style>
+</head>
+<body>
+<h1>Source Financial Data</h1>
+<p class="meta">Extracted from: <strong>Maher Copy FY27 SD Targets.xlsx</strong> (copied to project as FY27 Financials.xlsx)</p>
+<p class="meta">Extraction date: March 4, 2026</p>
+<p class="meta">Sheet: FY27 Bookings Targets — Columns AB-AF (Finance Investment Bookings Target), Rows 10-15 (US Majors)</p>
+<p class="meta">FY26 data from: FY26 Bookings Historicals — Columns T-X (FY26 Investment Bookings Actuals), Rows 5-10</p>
+
+<div class="mapping">
+<h3>Label Mapping (Maher Copy → Application)</h3>
+<dl>
+  <dt>CME → CME (TMT)</dt><dd>Consumer, Media &amp; Entertainment. Salesforce regions CME (4 accounts) + TMT (509 accounts). Covers Technology, Media &amp; Entertainment, Telecom industries.</dd>
+  <dt>FSI → FSI</dt><dd>Financial Services &amp; Insurance. Salesforce region FSI (376 accounts).</dd>
+  <dt>FSIGlobals → FSIGlobals</dt><dd>FSI Global accounts. Salesforce region FSIGlobals (54 accounts). Includes BofA, Citi, JPMC, Morgan Stanley, Goldman Sachs, Fiserv.</dd>
+  <dt>HCLS → HCLS</dt><dd>Healthcare &amp; Life Sciences. Salesforce region HCLS (561 accounts).</dd>
+  <dt>MFG → MFG</dt><dd>Manufacturing &amp; Industrial. Salesforce region MFG (434 accounts).</dd>
+  <dt>RetailCG → RCG</dt><dd>Retail &amp; Consumer Goods. Salesforce regions RCG (266 accounts) + RetailCG (2 accounts).</dd>
+</dl>
+</div>
+
+<h2>FY2027 — Investment Budget (Plan)</h2>
+<table>
+<thead>
+<tr><th>Portfolio</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>FY Total</th></tr>
+</thead>
+<tbody>
+<tr><td>CME (TMT)</td><td>$2,097,698</td><td>$356,771</td><td>$960,069</td><td>$6,171,817</td><td>$9,586,354</td></tr>
+<tr><td>FSI</td><td>$351,330</td><td>$926,576</td><td>$1,195,300</td><td>$3,794,939</td><td>$6,268,145</td></tr>
+<tr><td>FSIGlobals</td><td>$1,102,372</td><td>$7,966,774</td><td>$620,277</td><td>$590,619</td><td>$10,280,043</td></tr>
+<tr><td>HCLS</td><td>$17,635</td><td>$433,316</td><td>$2,054,713</td><td>$4,052,490</td><td>$6,558,154</td></tr>
+<tr><td>MFG</td><td>$175,665</td><td>$308,647</td><td>$3,723,915</td><td>$2,325,359</td><td>$6,533,586</td></tr>
+<tr><td>RCG</td><td>$195,070</td><td>$1,016,915</td><td>$607,894</td><td>$1,861,636</td><td>$3,681,515</td></tr>
+<tr class="total-row"><td>US Majors Total</td><td>$3,939,769</td><td>$11,009,000</td><td>$9,162,169</td><td>$18,796,859</td><td>$42,907,797</td></tr>
+</tbody>
+</table>
+
+<h2>FY2026 — Investment Actuals</h2>
+<table>
+<thead>
+<tr><th>Portfolio</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>FY Total</th></tr>
+</thead>
+<tbody>
+<tr><td>CME (TMT)</td><td>$3,080,900</td><td>$901,300</td><td>$938,125</td><td>$4,159,000</td><td>$9,079,325</td></tr>
+<tr><td>FSI</td><td>$516,000</td><td>$2,340,780</td><td>$1,167,980</td><td>$2,557,294</td><td>$6,582,054</td></tr>
+<tr><td>FSIGlobals</td><td>$1,619,060</td><td>$20,126,209</td><td>$606,100</td><td>$398,000</td><td>$22,749,369</td></tr>
+<tr><td>HCLS</td><td>$25,900</td><td>$1,094,672</td><td>$2,007,750</td><td>$2,730,850</td><td>$5,859,172</td></tr>
+<tr><td>MFG</td><td>$258,000</td><td>$779,725</td><td>$3,638,800</td><td>$1,566,989</td><td>$6,243,514</td></tr>
+<tr><td>RCG</td><td>$286,500</td><td>$2,569,000</td><td>$594,000</td><td>$1,254,500</td><td>$4,704,000</td></tr>
+<tr class="total-row"><td>US Majors Total</td><td>$5,786,360</td><td>$27,811,686</td><td>$8,952,755</td><td>$12,666,633</td><td>$55,217,434</td></tr>
+</tbody>
+</table>
+
+<h2>Data Source Notes</h2>
+<ul>
+<li>FY2027 figures are <strong>Finance Investment Bookings Targets</strong> (plan/budget).</li>
+<li>FY2026 figures are <strong>Investment Bookings Actuals</strong> (historical results), not original plan budgets.</li>
+<li>The original "Technology" budget label in the application database was the Maher Copy "CME" row — confirmed by exact Q1-Q4 match.</li>
+<li>Editable budget data is maintained in <code>budget_data/budget_data.csv</code>.</li>
+<li>Use <code>scripts/refresh_budgets.py</code> to import from a new Maher Copy file.</li>
+</ul>
+</body>
+</html>

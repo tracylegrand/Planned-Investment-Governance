@@ -117,9 +117,10 @@ struct InvestmentRequest: Codable, Identifiable {
         case "DM_APPROVED": return "DM Approved"
         case "RD_APPROVED": return "RD Approved"
         case "AVP_APPROVED": return "AVP Approved"
-        case "FINAL_APPROVED": return "Approved"
+        case "FINAL_APPROVED": return "Approved for IC"
         case "REJECTED": return "Rejected"
         case "DENIED": return "Denied"
+        case "CANCELLED": return "Cancelled"
         default: return status
         }
     }
@@ -241,6 +242,7 @@ struct SFDCAccount: Codable, Identifiable, Hashable {
     let accountName: String
     let theater: String?
     let industrySegment: String?
+    let region: String?
     
     var id: String { accountId }
     
@@ -249,6 +251,7 @@ struct SFDCAccount: Codable, Identifiable, Hashable {
         case accountName = "ACCOUNT_NAME"
         case theater = "THEATER"
         case industrySegment = "INDUSTRY_SEGMENT"
+        case region = "REGION"
     }
 }
 
@@ -282,6 +285,20 @@ struct SFDCOpportunity: Codable, Identifiable, Hashable {
         case amount = "AMOUNT"
         case closeDate = "CLOSE_DATE"
         case ownerName = "OWNER_NAME"
+    }
+}
+
+struct SFDCInvestmentStatus: Codable {
+    let opportunityId: String
+    let opportunityName: String
+    let stageName: String
+    let approvalStatus: String
+
+    enum CodingKeys: String, CodingKey {
+        case opportunityId = "OPPORTUNITY_ID"
+        case opportunityName = "OPPORTUNITY_NAME"
+        case stageName = "STAGE_NAME"
+        case approvalStatus = "APPROVAL_STATUS"
     }
 }
 

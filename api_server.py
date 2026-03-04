@@ -5,6 +5,7 @@ Investment Governance API Server with Local SQLite Cache
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -25,6 +26,8 @@ with open(CONFIG_FILE) as f:
 API_PORT = RUNTIME_CONFIG.get("api_port", 8767)
 CACHE_DB_NAME = RUNTIME_CONFIG.get("cache_db", "cache.db")
 CONNECTION_NAME = os.environ.get("SNOWFLAKE_CONNECTION_NAME", RUNTIME_CONFIG.get("connection_name", "DemoAcct"))
+DML_WAREHOUSE = RUNTIME_CONFIG.get("dml_warehouse", "SNOWHOUSE")
+READ_WAREHOUSE = RUNTIME_CONFIG.get("read_warehouse", "SNOWADHOC")
 
 CACHE_DB_PATH = SCRIPT_DIR / CACHE_DB_NAME
 
@@ -44,8 +47,11 @@ cache_progress = {
 
 impersonated_user = None
 
-def get_snowflake_connection():
-    return snowflake.connector.connect(connection_name=CONNECTION_NAME)
+def get_snowflake_connection(dml=False):
+    conn = snowflake.connector.connect(connection_name=CONNECTION_NAME)
+    wh = DML_WAREHOUSE if dml else READ_WAREHOUSE
+    conn.cursor().execute(f"USE WAREHOUSE {wh}")
+    return conn
 
 def get_cache_connection():
     conn = sqlite3.connect(str(CACHE_DB_PATH), check_same_thread=False)
@@ -170,7 +176,8 @@ def init_cache_db():
             account_id TEXT,
             account_name TEXT PRIMARY KEY,
             theater TEXT,
-            industry_segment TEXT
+            industry_segment TEXT,
+            region TEXT
         )
     """)
 
@@ -689,20 +696,22 @@ def full_cache_refresh():
 
                     update_progress("accounts", 6, "Building account lookup cache...")
                     sf_cur.execute("""
-                        SELECT '' AS ACCOUNT_ID, ACCOUNT_NAME, THEATER, INDUSTRY_SEGMENT
-                        FROM TEMP.INVESTMENT_GOVERNANCE.SFDC_ACCOUNTS
-                        WHERE ACCOUNT_NAME IS NOT NULL
-                        GROUP BY ACCOUNT_NAME, THEATER, INDUSTRY_SEGMENT
-                        ORDER BY ACCOUNT_NAME
+                        SELECT ID AS ACCOUNT_ID, NAME AS ACCOUNT_NAME,
+                               ACCOUNT_OWNER_GEO_C AS THEATER, INDUSTRY_C AS INDUSTRY_SEGMENT,
+                               ACCOUNT_OWNER_REGION_C AS REGION
+                        FROM FIVETRAN.SALESFORCE.ACCOUNT
+                        WHERE NAME IS NOT NULL AND _FIVETRAN_DELETED = FALSE
+                        GROUP BY ID, NAME, ACCOUNT_OWNER_GEO_C, INDUSTRY_C, ACCOUNT_OWNER_REGION_C
+                        ORDER BY NAME
                     """)
                     acct_rows = sf_cur.fetchall()
                     cache_cur.execute("DELETE FROM cached_accounts")
                     cache_cur.executemany(
-                        "INSERT OR IGNORE INTO cached_accounts VALUES (?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO cached_accounts VALUES (?, ?, ?, ?, ?)",
                         acct_rows
                     )
                     cache_conn.commit()
-                    print(f"Cached {len(acct_rows)} SFDC accounts")
+                    print(f"Cached {len(acct_rows)} Salesforce accounts")
 
                     sf_timestamps = get_snowflake_timestamps(sf_conn)
                     update_cache_timestamp('INVESTMENT_REQUESTS', sf_timestamps.get('INVESTMENT_REQUESTS'))
@@ -1087,6 +1096,46 @@ def get_budgets():
     finally:
         sf_conn.close()
 
+@app.route('/api/budgets/import', methods=['POST'])
+def import_budgets():
+    if not is_admin():
+        return jsonify({"error": "Admin access required"}), 403
+    data = request.get_json()
+    budgets = data.get("budgets", [])
+    if not budgets:
+        return jsonify({"error": "No budget data provided"}), 400
+    sf_conn = get_snowflake_connection(dml=True)
+    try:
+        cur = sf_conn.cursor()
+        imported = 0
+        for b in budgets:
+            fy = b.get("fiscal_year")
+            portfolio = b.get("portfolio")
+            theater = b.get("theater", "US Majors")
+            q1 = float(b.get("q1_budget", 0))
+            q2 = float(b.get("q2_budget", 0))
+            q3 = float(b.get("q3_budget", 0))
+            q4 = float(b.get("q4_budget", 0))
+            total = float(b.get("budget_amount", q1 + q2 + q3 + q4))
+            cur.execute("""
+                MERGE INTO TEMP.INVESTMENT_GOVERNANCE.ANNUAL_BUDGETS t
+                USING (SELECT %s AS FY, %s AS TH, %s AS IND) s
+                ON t.FISCAL_YEAR = s.FY AND t.THEATER = s.TH AND t.INDUSTRY_SEGMENT = s.IND
+                WHEN MATCHED THEN UPDATE SET
+                    Q1_BUDGET = %s, Q2_BUDGET = %s, Q3_BUDGET = %s, Q4_BUDGET = %s,
+                    BUDGET_AMOUNT = %s
+                WHEN NOT MATCHED THEN INSERT
+                    (FISCAL_YEAR, THEATER, INDUSTRY_SEGMENT, PORTFOLIO, Q1_BUDGET, Q2_BUDGET, Q3_BUDGET, Q4_BUDGET, BUDGET_AMOUNT, ALLOCATED_AMOUNT)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
+            """, (fy, theater, portfolio, q1, q2, q3, q4, total, fy, theater, portfolio, portfolio, q1, q2, q3, q4, total))
+            imported += 1
+        return jsonify({"success": True, "imported": imported})
+    except Exception as e:
+        print(f"Error importing budgets: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        sf_conn.close()
+
 @app.route('/api/requests')
 def get_requests():
     theater = request.args.get('theater')
@@ -1241,7 +1290,7 @@ def create_request():
     chain_for_sync = list(chain)
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             cur.execute("""
@@ -1371,7 +1420,7 @@ def update_request(request_id):
     chain_for_sync = list(chain)
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             updates = []
@@ -1454,7 +1503,7 @@ def delete_request(request_id):
         cache_conn2.close()
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             cur.execute("DELETE FROM TEMP.INVESTMENT_GOVERNANCE.APPROVAL_STEPS WHERE REQUEST_ID = %s", (request_id,))
@@ -1518,7 +1567,7 @@ def submit_request(request_id):
     chain_for_sync = list(chain)
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             cur.execute("""
@@ -1591,7 +1640,7 @@ def withdraw_request(request_id):
         cache_conn2.close()
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             cur.execute("DELETE FROM TEMP.INVESTMENT_GOVERNANCE.APPROVAL_STEPS WHERE REQUEST_ID = %s", (request_id,))
@@ -1614,6 +1663,51 @@ def withdraw_request(request_id):
     sync_to_snowflake(_sync)
 
     return jsonify({"message": "Request withdrawn to draft"})
+
+@app.route('/api/requests/<int:request_id>/cancel', methods=['POST'])
+def cancel_request(request_id):
+    data = request.json or {}
+    comment = data.get('COMMENT', '')
+
+    cache_conn = get_cache_connection()
+    try:
+        cur = cache_conn.cursor()
+        cur.execute("SELECT status FROM cached_investment_requests WHERE request_id = ?", (request_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Request not found"}), 404
+        if row["status"] == "CANCELLED":
+            return jsonify({"error": "Request is already cancelled"}), 400
+    finally:
+        cache_conn.close()
+
+    user_info = get_effective_user()
+    current_user = user_info["username"] if user_info else "UNKNOWN"
+    cancelled_by_name = user_info["display_name"] if user_info else current_user
+    now_iso = datetime.now().isoformat()
+
+    update_cache_request(request_id, {
+        "status": "CANCELLED",
+        "updated_at": now_iso
+    })
+
+    def _sync():
+        sf_conn = get_snowflake_connection(dml=True)
+        try:
+            cur = sf_conn.cursor()
+            cur.execute("""
+                UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
+                SET STATUS = 'CANCELLED',
+                    UPDATED_AT = CURRENT_TIMESTAMP()
+                WHERE REQUEST_ID = %s
+            """, (request_id,))
+            sf_conn.commit()
+        finally:
+            sf_conn.close()
+
+    sync_to_snowflake(_sync)
+
+    return jsonify({"message": "Request cancelled"})
 
 @app.route('/api/requests/<int:request_id>/approve', methods=['POST'])
 def approve_request(request_id):
@@ -1699,7 +1793,7 @@ def approve_request(request_id):
         sf_next_eid = next_eid
 
         def _sync():
-            sf_conn = get_snowflake_connection()
+            sf_conn = get_snowflake_connection(dml=True)
             try:
                 sf_cur = sf_conn.cursor()
                 sf_cur.execute("""
@@ -1770,7 +1864,7 @@ def approve_request(request_id):
 
         def _sync():
             sf_new_status, sf_approver_col, sf_title_col, sf_time_col, sf_comments_col, sf_new_level = sf_transitions[current_status]
-            sf_conn = get_snowflake_connection()
+            sf_conn = get_snowflake_connection(dml=True)
             try:
                 cur = sf_conn.cursor()
                 cur.execute(f"""
@@ -1813,7 +1907,7 @@ def reject_request(request_id):
     })
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             cur.execute("""
@@ -1832,6 +1926,16 @@ def reject_request(request_id):
 @app.route('/api/requests/<int:request_id>/revise', methods=['POST'])
 def revise_request(request_id):
     data = request.json or {}
+    title = data.get('REQUEST_TITLE')
+    account_id = data.get('ACCOUNT_ID')
+    account_name = data.get('ACCOUNT_NAME')
+    investment_type = data.get('INVESTMENT_TYPE')
+    amount = data.get('REQUESTED_AMOUNT')
+    quarter = data.get('INVESTMENT_QUARTER')
+    theater = data.get('THEATER')
+    industry_segment = data.get('INDUSTRY_SEGMENT')
+    sfdc_link = data.get('SFDC_OPPORTUNITY_LINK')
+    expected_roi = data.get('EXPECTED_ROI')
     justification = data.get('BUSINESS_JUSTIFICATION')
     outcome = data.get('EXPECTED_OUTCOME')
     risk = data.get('RISK_ASSESSMENT')
@@ -1856,6 +1960,16 @@ def revise_request(request_id):
     now_iso = datetime.now().isoformat()
 
     cache_updates = {
+        "request_title": title,
+        "account_id": account_id,
+        "account_name": account_name,
+        "investment_type": investment_type,
+        "requested_amount": amount,
+        "investment_quarter": quarter,
+        "theater": theater,
+        "industry_segment": industry_segment,
+        "sfdc_opportunity_link": sfdc_link,
+        "expected_roi": expected_roi,
         "business_justification": justification,
         "expected_outcome": outcome,
         "risk_assessment": risk,
@@ -1875,42 +1989,72 @@ def revise_request(request_id):
     update_cache_request(request_id, cache_updates)
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             if submit:
                 cur.execute("""
                     UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
-                    SET BUSINESS_JUSTIFICATION = %s,
+                    SET REQUEST_TITLE = %s,
+                        ACCOUNT_ID = %s,
+                        ACCOUNT_NAME = %s,
+                        INVESTMENT_TYPE = %s,
+                        REQUESTED_AMOUNT = %s,
+                        INVESTMENT_QUARTER = %s,
+                        THEATER = %s,
+                        INDUSTRY_SEGMENT = %s,
+                        SFDC_OPPORTUNITY_LINK = %s,
+                        EXPECTED_ROI = %s,
+                        BUSINESS_JUSTIFICATION = %s,
                         EXPECTED_OUTCOME = %s,
                         RISK_ASSESSMENT = %s,
                         STATUS = %s,
                         SUBMITTED_COMMENT = %s, SUBMITTED_BY_NAME = %s, SUBMITTED_AT = CURRENT_TIMESTAMP(),
                         UPDATED_AT = CURRENT_TIMESTAMP()
                     WHERE REQUEST_ID = %s
-                """, (justification, outcome, risk, new_status, comment, submitted_by_name, request_id))
+                """, (title, account_id, account_name, investment_type, amount, quarter, theater, industry_segment, sfdc_link, expected_roi, justification, outcome, risk, new_status, comment, submitted_by_name, request_id))
             else:
                 if comment:
                     cur.execute("""
                         UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
-                        SET BUSINESS_JUSTIFICATION = %s,
+                        SET REQUEST_TITLE = %s,
+                            ACCOUNT_ID = %s,
+                            ACCOUNT_NAME = %s,
+                            INVESTMENT_TYPE = %s,
+                            REQUESTED_AMOUNT = %s,
+                            INVESTMENT_QUARTER = %s,
+                            THEATER = %s,
+                            INDUSTRY_SEGMENT = %s,
+                            SFDC_OPPORTUNITY_LINK = %s,
+                            EXPECTED_ROI = %s,
+                            BUSINESS_JUSTIFICATION = %s,
                             EXPECTED_OUTCOME = %s,
                             RISK_ASSESSMENT = %s,
                             STATUS = %s,
                             DRAFT_COMMENT = %s, DRAFT_BY_NAME = %s, DRAFT_AT = CURRENT_TIMESTAMP(),
                             UPDATED_AT = CURRENT_TIMESTAMP()
                         WHERE REQUEST_ID = %s
-                    """, (justification, outcome, risk, new_status, comment, submitted_by_name, request_id))
+                    """, (title, account_id, account_name, investment_type, amount, quarter, theater, industry_segment, sfdc_link, expected_roi, justification, outcome, risk, new_status, comment, submitted_by_name, request_id))
                 else:
                     cur.execute("""
                         UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
-                        SET BUSINESS_JUSTIFICATION = %s,
+                        SET REQUEST_TITLE = %s,
+                            ACCOUNT_ID = %s,
+                            ACCOUNT_NAME = %s,
+                            INVESTMENT_TYPE = %s,
+                            REQUESTED_AMOUNT = %s,
+                            INVESTMENT_QUARTER = %s,
+                            THEATER = %s,
+                            INDUSTRY_SEGMENT = %s,
+                            SFDC_OPPORTUNITY_LINK = %s,
+                            EXPECTED_ROI = %s,
+                            BUSINESS_JUSTIFICATION = %s,
                             EXPECTED_OUTCOME = %s,
                             RISK_ASSESSMENT = %s,
                             STATUS = %s,
                             UPDATED_AT = CURRENT_TIMESTAMP()
                         WHERE REQUEST_ID = %s
-                    """, (justification, outcome, risk, new_status, request_id))
+                    """, (title, account_id, account_name, investment_type, amount, quarter, theater, industry_segment, sfdc_link, expected_roi, justification, outcome, risk, new_status, request_id))
             sf_conn.commit()
         finally:
             sf_conn.close()
@@ -1954,7 +2098,7 @@ def send_back_for_revision(request_id):
         cache_conn2.close()
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             cur.execute("DELETE FROM TEMP.INVESTMENT_GOVERNANCE.APPROVAL_STEPS WHERE REQUEST_ID = %s", (request_id,))
@@ -2000,7 +2144,7 @@ def deny_request(request_id):
     })
 
     def _sync():
-        sf_conn = get_snowflake_connection()
+        sf_conn = get_snowflake_connection(dml=True)
         try:
             cur = sf_conn.cursor()
             cur.execute("""
@@ -2034,7 +2178,7 @@ def search_accounts():
         total = cur.fetchone()[0]
 
         cur.execute("""
-            SELECT account_id, account_name, theater, industry_segment
+            SELECT account_id, account_name, theater, industry_segment, region
             FROM cached_accounts
             WHERE UPPER(account_name) LIKE UPPER(?)
             ORDER BY account_name
@@ -2047,7 +2191,8 @@ def search_accounts():
                 "ACCOUNT_ID": row[0],
                 "ACCOUNT_NAME": row[1],
                 "THEATER": row[2],
-                "INDUSTRY_SEGMENT": row[3]
+                "INDUSTRY_SEGMENT": row[3],
+                "REGION": row[4]
             } for row in rows],
             "total_matches": total
         })
@@ -2057,39 +2202,53 @@ def search_accounts():
     finally:
         cache_conn.close()
 
+THEATER_DISPLAY_NAMES = {
+    "USMajors": "US Majors",
+    "USPubSec": "US Public Sector",
+    "AMSExpansion": "Americas Enterprise",
+    "AMSPartner": "Americas Enterprise",
+    "AMSAcquisition": "Americas Acquisition",
+    "AMSEnt": "Americas Enterprise",
+    "EMEA": "EMEA",
+    "APJ": "APJ",
+    "APAC": "APJ",
+}
+
+REGION_TO_PORTFOLIO = {
+    "CME": "CME (TMT)",
+    "TMT": "CME (TMT)",
+    "RetailCG": "RCG",
+}
+
 @app.route('/api/lookup/theaters-industries')
 def get_theaters_industries():
     cache_conn = get_cache_connection()
     try:
         cur = cache_conn.cursor()
         cur.execute("""
-            SELECT DISTINCT theater FROM cached_accounts
+            SELECT DISTINCT theater, region FROM cached_accounts
             WHERE theater IS NOT NULL AND theater != ''
-            ORDER BY theater
+              AND region IS NOT NULL AND region != ''
+            ORDER BY theater, region
         """)
-        theaters = [row[0] for row in cur.fetchall()]
 
-        cur.execute("""
-            SELECT DISTINCT industry_segment FROM cached_accounts
-            WHERE industry_segment IS NOT NULL AND industry_segment != ''
-            ORDER BY industry_segment
-        """)
-        industries = [row[0] for row in cur.fetchall()]
-
-        cur.execute("""
-            SELECT DISTINCT theater, industry_segment FROM cached_accounts
-            WHERE theater IS NOT NULL AND theater != ''
-              AND industry_segment IS NOT NULL AND industry_segment != ''
-            ORDER BY theater, industry_segment
-        """)
         combos = {}
+        all_portfolios = set()
         for row in cur.fetchall():
-            combos.setdefault(row[0], []).append(row[1])
+            raw_theater = row[0]
+            raw_region = row[1]
+            display_theater = THEATER_DISPLAY_NAMES.get(raw_theater, raw_theater)
+            portfolio = REGION_TO_PORTFOLIO.get(raw_region, raw_region)
+            combos.setdefault(display_theater, set()).add(portfolio)
+            all_portfolios.add(portfolio)
+
+        industries_by_theater = {k: sorted(v) for k, v in combos.items()}
+        theaters = sorted(industries_by_theater.keys())
 
         return jsonify({
             "theaters": theaters,
-            "industries": industries,
-            "industries_by_theater": combos
+            "industries": sorted(all_portfolios),
+            "industries_by_theater": industries_by_theater
         })
     except Exception as e:
         print(f"Error fetching theater/industry lookups: {e}")
@@ -2166,7 +2325,7 @@ def link_opportunity(request_id):
     if not opportunity_id:
         return jsonify({"error": "OPPORTUNITY_ID required"}), 400
 
-    sf_conn = get_snowflake_connection()
+    sf_conn = get_snowflake_connection(dml=True)
     try:
         cur = sf_conn.cursor()
 
@@ -2188,7 +2347,7 @@ def link_opportunity(request_id):
 
 @app.route('/api/requests/<int:request_id>/opportunities/<opportunity_id>', methods=['DELETE'])
 def unlink_opportunity(request_id, opportunity_id):
-    sf_conn = get_snowflake_connection()
+    sf_conn = get_snowflake_connection(dml=True)
     try:
         cur = sf_conn.cursor()
         cur.execute("""
@@ -2202,6 +2361,142 @@ def unlink_opportunity(request_id, opportunity_id):
         return jsonify({"error": str(e)}), 500
     finally:
         sf_conn.close()
+
+
+def _parse_sfdc_opportunity_id(url_or_id):
+    if not url_or_id:
+        return None
+    match = re.search(r'(006[a-zA-Z0-9]{12,15})', url_or_id)
+    return match.group(1) if match else None
+
+
+@app.route('/api/sfdc/opportunity-status/<opportunity_id>')
+def get_sfdc_opportunity_status(opportunity_id):
+    sf_conn = get_snowflake_connection()
+    try:
+        cur = sf_conn.cursor()
+        cur.execute("""
+            SELECT ID, NAME, STAGE_NAME, SBAA_APPROVAL_STATUS_C
+            FROM FIVETRAN.SALESFORCE.OPPORTUNITY
+            WHERE ID = %s
+        """, (opportunity_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Opportunity not found"}), 404
+
+        return jsonify({
+            "OPPORTUNITY_ID": row[0],
+            "OPPORTUNITY_NAME": row[1],
+            "STAGE_NAME": row[2],
+            "APPROVAL_STATUS": row[3] or "N/A"
+        })
+    except Exception as e:
+        print(f"Error fetching SFDC opportunity status: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        sf_conn.close()
+
+
+@app.route('/api/sfdc/opportunity-status-by-url')
+def get_sfdc_opportunity_status_by_url():
+    url = request.args.get('url', '')
+    opp_id = _parse_sfdc_opportunity_id(url)
+    if not opp_id:
+        return jsonify({"error": "Could not parse Salesforce Opportunity ID from URL"}), 400
+
+    sf_conn = get_snowflake_connection()
+    try:
+        cur = sf_conn.cursor()
+        cur.execute("""
+            SELECT ID, NAME, STAGE_NAME, SBAA_APPROVAL_STATUS_C
+            FROM FIVETRAN.SALESFORCE.OPPORTUNITY
+            WHERE ID = %s
+        """, (opp_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Opportunity not found"}), 404
+
+        return jsonify({
+            "OPPORTUNITY_ID": row[0],
+            "OPPORTUNITY_NAME": row[1],
+            "STAGE_NAME": row[2],
+            "APPROVAL_STATUS": row[3] or "N/A"
+        })
+    except Exception as e:
+        print(f"Error fetching SFDC opportunity status: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        sf_conn.close()
+
+
+@app.route('/api/requests/<int:request_id>/sfdc-link', methods=['PUT'])
+def update_sfdc_link(request_id):
+    data = request.json
+    sfdc_url = data.get('SFDC_OPPORTUNITY_LINK', '')
+
+    cache_conn = get_cache_connection()
+    try:
+        cur = cache_conn.cursor()
+        cur.execute("SELECT status FROM cached_investment_requests WHERE request_id = ?", (request_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Request not found"}), 404
+        if row["status"] != 'FINAL_APPROVED':
+            return jsonify({"error": "SFDC link can only be updated on Approved for IC requests"}), 400
+    finally:
+        cache_conn.close()
+
+    opp_id = _parse_sfdc_opportunity_id(sfdc_url)
+
+    now_iso = datetime.now().isoformat()
+
+    sf_conn = get_snowflake_connection(dml=True)
+    try:
+        cur = sf_conn.cursor()
+        cur.execute("""
+            UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
+            SET SFDC_OPPORTUNITY_LINK = %s, UPDATED_AT = CURRENT_TIMESTAMP()
+            WHERE REQUEST_ID = %s
+        """, (sfdc_url, request_id))
+        sf_conn.commit()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        sf_conn.close()
+
+    cache_conn = get_cache_connection()
+    try:
+        cur = cache_conn.cursor()
+        cur.execute(
+            "UPDATE cached_investment_requests SET sfdc_opportunity_link = ?, updated_at = ? WHERE request_id = ?",
+            (sfdc_url, now_iso, request_id)
+        )
+        cache_conn.commit()
+    finally:
+        cache_conn.close()
+
+    if opp_id:
+        sf_conn2 = get_snowflake_connection(dml=True)
+        try:
+            cur2 = sf_conn2.cursor()
+            effective = get_effective_user()
+            current_user = effective["username"] if effective else "UNKNOWN"
+            cur2.execute("""
+                MERGE INTO TEMP.INVESTMENT_GOVERNANCE.REQUEST_OPPORTUNITIES t
+                USING (SELECT %s AS REQUEST_ID, %s AS OPPORTUNITY_ID) s
+                ON t.REQUEST_ID = s.REQUEST_ID AND t.OPPORTUNITY_ID = s.OPPORTUNITY_ID
+                WHEN NOT MATCHED THEN INSERT (REQUEST_ID, OPPORTUNITY_ID, LINKED_BY) VALUES (s.REQUEST_ID, s.OPPORTUNITY_ID, %s)
+            """, (request_id, opp_id, current_user))
+            sf_conn2.commit()
+        except Exception as e:
+            print(f"Warning: Could not auto-link opportunity: {e}")
+        finally:
+            sf_conn2.close()
+
+    result = {"message": "SFDC link updated", "sfdc_opportunity_link": sfdc_url}
+    if opp_id:
+        result["parsed_opportunity_id"] = opp_id
+    return jsonify(result)
 
 if __name__ == '__main__':
     print(f"Starting Investment Governance API Server on port {API_PORT}")

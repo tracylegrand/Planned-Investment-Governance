@@ -40,25 +40,17 @@ enum TheaterMapping {
     }
 
     static let industrySegments: [String] = [
-        "Consulting & Professional Services",
-        "Financial Services",
-        "Healthcare & Life Sciences",
-        "Manufacturing & Industrial",
-        "Media & Entertainment",
-        "Public Sector",
-        "Retail & Consumer Goods",
-        "Technology",
-        "Telecom",
-        "Travel & Hospitality"
+        "CME (TMT)",
+        "FSI",
+        "FSIGlobals",
+        "HCLS",
+        "MFG",
+        "RCG"
     ]
 
     static let portfoliosByTheater: [String: [String]] = [
         "US Majors": industrySegments,
-        "US Public Sector": ["Federal", "SLED"],
-        "Americas Enterprise": industrySegments,
-        "Americas Acquisition": industrySegments,
-        "EMEA": industrySegments,
-        "APJ": industrySegments
+        "US Public Sector": ["Federal", "SLED"]
     ]
 
     static let allTheaters: [String] = ["All", "US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]

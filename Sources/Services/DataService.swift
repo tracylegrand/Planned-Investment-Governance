@@ -790,6 +790,34 @@ class DataService: ObservableObject {
         }.resume()
     }
     
+    func cancelRequest(requestId: Int, completion: @escaping (Bool, String?) -> Void) {
+        guard let url = URL(string: "\(baseURL)/requests/\(requestId)/cancel") else {
+            completion(false, "Invalid URL")
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [:] as [String: Any])
+        
+        session.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self.loadInvestmentRequests()
+                    self.loadSummary()
+                    completion(true, nil)
+                } else {
+                    var errorMsg = "Unknown error"
+                    if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let err = json["error"] as? String {
+                        errorMsg = err
+                    }
+                    completion(false, errorMsg)
+                }
+            }
+        }.resume()
+    }
+    
     func approveRequest(requestId: Int, comments: String?, completion: @escaping (Bool, String?) -> Void) {
         guard let url = URL(string: "\(baseURL)/requests/\(requestId)/approve") else {
             completion(false, "Invalid URL")
@@ -854,7 +882,7 @@ class DataService: ObservableObject {
         }.resume()
     }
     
-    func reviseRequest(requestId: Int, justification: String, outcome: String, risk: String, submit: Bool, comment: String? = nil, completion: @escaping (Bool, String?) -> Void) {
+    func reviseRequest(requestId: Int, title: String?, accountId: String?, accountName: String?, investmentType: String?, amount: Double?, quarter: String?, theater: String?, industrySegment: String?, salesforceURL: String?, justification: String, outcome: String, risk: String, submit: Bool, comment: String? = nil, completion: @escaping (Bool, String?) -> Void) {
         guard let url = URL(string: "\(baseURL)/requests/\(requestId)/revise") else {
             completion(false, "Invalid URL")
             return
@@ -866,6 +894,15 @@ class DataService: ObservableObject {
             "RISK_ASSESSMENT": risk,
             "SUBMIT": submit
         ]
+        if let title = title { body["REQUEST_TITLE"] = title }
+        if let accountId = accountId { body["ACCOUNT_ID"] = accountId }
+        if let accountName = accountName { body["ACCOUNT_NAME"] = accountName }
+        if let investmentType = investmentType { body["INVESTMENT_TYPE"] = investmentType }
+        if let amount = amount { body["REQUESTED_AMOUNT"] = amount }
+        if let quarter = quarter { body["INVESTMENT_QUARTER"] = quarter }
+        if let theater = theater { body["THEATER"] = theater }
+        if let industrySegment = industrySegment { body["INDUSTRY_SEGMENT"] = industrySegment }
+        if let salesforceURL = salesforceURL { body["SFDC_OPPORTUNITY_LINK"] = salesforceURL }
         if let comment = comment { body["COMMENT"] = comment }
         
         var request = URLRequest(url: url)
@@ -1187,6 +1224,56 @@ class DataService: ObservableObject {
                 } catch {
                     print("Error decoding approval chain: \(error)")
                     completion([])
+                }
+            }
+        }.resume()
+    }
+
+    func fetchSFDCOpportunityStatus(url: String, completion: @escaping (SFDCInvestmentStatus?) -> Void) {
+        guard let encodedURL = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let requestURL = URL(string: "\(baseURL)/sfdc/opportunity-status-by-url?url=\(encodedURL)") else {
+            completion(nil)
+            return
+        }
+
+        session.dataTask(with: requestURL) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self, let data = data else {
+                    completion(nil)
+                    return
+                }
+
+                do {
+                    let status = try self.decoder.decode(SFDCInvestmentStatus.self, from: data)
+                    completion(status)
+                } catch {
+                    print("Error decoding SFDC investment status: \(error)")
+                    completion(nil)
+                }
+            }
+        }.resume()
+    }
+
+    func updateSFDCLink(requestId: Int, url: String, completion: @escaping (Bool) -> Void) {
+        guard let requestURL = URL(string: "\(baseURL)/requests/\(requestId)/sfdc-link") else {
+            completion(false)
+            return
+        }
+
+        var req = URLRequest(url: requestURL)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = ["SFDC_OPPORTUNITY_LINK": url]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        session.dataTask(with: req) { _, response, error in
+            DispatchQueue.main.async {
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self.loadInvestmentRequests()
+                    completion(true)
+                } else {
+                    completion(false)
                 }
             }
         }.resume()

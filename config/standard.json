@@ -1,10 +1,12 @@
 {
-    "app_name": "Investment Governance",
-    "bundle_id": "com.snowflake.investmentgovernance",
-    "version": "1.0",
-    "build_number": "1",
-    "icon": "AppIcon",
-    "api_port": 8770,
-    "cache_db": "cache.db",
-    "connection_name": "DemoAcct"
+  "app_name": "Investment Governance",
+  "bundle_id": "com.snowflake.investmentgovernance",
+  "version": "1.1",
+  "build_number": "24",
+  "icon": "AppIcon",
+  "api_port": 8770,
+  "cache_db": "cache.db",
+  "connection_name": "DemoAcct",
+  "dml_warehouse": "SNOWHOUSE",
+  "read_warehouse": "SNOWADHOC"
 }

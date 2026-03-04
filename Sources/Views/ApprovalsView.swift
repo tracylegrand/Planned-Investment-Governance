@@ -267,7 +267,7 @@ struct ApprovalDetailSheet: View {
                                     Text(request.theater ?? "—")
                                 }
 
-                                LabeledField(label: "Industry Segment") {
+                                LabeledField(label: "Region") {
                                     Text(request.industrySegment ?? "—")
                                 }
                             }

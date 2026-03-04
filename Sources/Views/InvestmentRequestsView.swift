@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SortColumn: String {
-    case company, request, theater, industry, quarter, amount, status
+    case company, request, theater, industry, quarter, amount, status, nextApprover
 }
 
 struct InvestmentRequestsView: View {
@@ -64,13 +64,17 @@ struct InvestmentRequestsView: View {
         }
     }
     
-    private let theaters = TheaterMapping.allTheaters
+    private var theaters: [String] {
+        ["All"] + dataService.sfdcTheaters
+    }
     
-    private let portfoliosByTheater = TheaterMapping.portfoliosByTheater
+    private var portfoliosByTheater: [String: [String]] {
+        dataService.sfdcIndustriesByTheater
+    }
     
     private var availablePortfolios: [String] {
         if selectedTheater == "All" {
-            return portfoliosByTheater.values.flatMap { $0 }.sorted()
+            return Array(Set(portfoliosByTheater.values.flatMap { $0 })).sorted()
         }
         return portfoliosByTheater[selectedTheater] ?? []
     }
@@ -100,7 +104,13 @@ struct InvestmentRequestsView: View {
                 (request.accountName?.localizedCaseInsensitiveContains(searchText) ?? false)
             
             let matchesTheater = selectedTheater == "All" || TheaterMapping.dbCodes(forDisplayName: selectedTheater).contains(request.theater ?? "")
-            let matchesIndustry = selectedIndustries.isEmpty || selectedIndustries.contains(request.industrySegment ?? "")
+            let matchesIndustry: Bool
+            if selectedIndustries.isEmpty {
+                matchesIndustry = true
+            } else {
+                let seg = request.industrySegment ?? ""
+                matchesIndustry = selectedIndustries.contains(seg)
+            }
             let matchesQuarter: Bool
             if selectedQuarters.isEmpty {
                 matchesQuarter = true
@@ -155,6 +165,8 @@ struct InvestmentRequestsView: View {
                 result = (a.requestedAmount ?? 0) < (b.requestedAmount ?? 0)
             case .status:
                 result = a.status < b.status
+            case .nextApprover:
+                result = (a.nextApproverName ?? "") < (b.nextApproverName ?? "")
             }
             return sortAscending ? result : !result
         }
@@ -186,21 +198,28 @@ struct InvestmentRequestsView: View {
             .padding()
             
             HStack(spacing: 12) {
-                Picker("Theater", selection: $selectedTheater) {
-                    ForEach(theaters, id: \.self) { Text($0) }
-                }
-                .frame(width: 150)
-                
-                Button {
-                    showIndustryPicker.toggle()
-                } label: {
-                    HStack {
-                        Text(selectedIndustries.isEmpty ? "All Portfolios" : "\(selectedIndustries.count) Selected")
-                        Image(systemName: "chevron.down")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Theater").font(.caption).foregroundColor(.secondary)
+                    Picker("Theater", selection: $selectedTheater) {
+                        ForEach(theaters, id: \.self) { Text($0) }
                     }
-                    .frame(width: 140)
+                    .labelsHidden()
+                    .frame(width: 150)
                 }
-                .disabled(availablePortfolios.isEmpty)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Region").font(.caption).foregroundColor(.secondary)
+                    Button {
+                        showIndustryPicker.toggle()
+                    } label: {
+                        HStack {
+                            Text(selectedIndustries.isEmpty ? "All Regions" : "\(selectedIndustries.count) Selected")
+                            Image(systemName: "chevron.down")
+                        }
+                        .frame(width: 140)
+                    }
+                    .disabled(availablePortfolios.isEmpty)
+                }
                 .popover(isPresented: $showIndustryPicker, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -265,14 +284,17 @@ struct InvestmentRequestsView: View {
                     .frame(width: 320)
                 }
                 
-                Button {
-                    showQuarterPicker.toggle()
-                } label: {
-                    HStack {
-                        Text(selectedQuarters.isEmpty ? "All Quarters" : "\(selectedQuarters.count) Selected")
-                        Image(systemName: "chevron.down")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Quarters").font(.caption).foregroundColor(.secondary)
+                    Button {
+                        showQuarterPicker.toggle()
+                    } label: {
+                        HStack {
+                            Text(selectedQuarters.isEmpty ? "All Quarters" : "\(selectedQuarters.count) Selected")
+                            Image(systemName: "chevron.down")
+                        }
+                        .frame(width: 120)
                     }
-                    .frame(width: 120)
                 }
                 .popover(isPresented: $showQuarterPicker, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -355,18 +377,25 @@ struct InvestmentRequestsView: View {
                     .frame(width: 200)
                 }
                 
-                Picker("Status", selection: $selectedStatus) {
-                    ForEach(statuses, id: \.self) { theater in
-                        Text(statusDisplayName(theater)).tag(theater)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Status").font(.caption).foregroundColor(.secondary)
+                    Picker("Status", selection: $selectedStatus) {
+                        ForEach(statuses, id: \.self) { theater in
+                            Text(statusDisplayName(theater)).tag(theater)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 130)
                 }
-                .frame(width: 130)
                 
-                Toggle(isOn: $filterPendingMyApproval) {
-                    Text("Pending My Approval")
-                        .font(.caption)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(" ").font(.caption)
+                    Toggle(isOn: $filterPendingMyApproval) {
+                        Text("Pending My Approval")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
                 }
-                .toggleStyle(.checkbox)
                 
                 if filterMyRequests {
                     Button(action: { filterMyRequests = false }) {
@@ -390,27 +419,33 @@ struct InvestmentRequestsView: View {
                     .buttonStyle(.plain)
                 }
                 
-                Button(action: clearAllFilters) {
-                    Text("Clear")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(" ").font(.caption)
+                    Button(action: clearAllFilters) {
+                        Text("Clear")
+                    }
+                    .disabled(!hasActiveFilters)
                 }
-                .disabled(!hasActiveFilters)
                 
                 Spacer()
                 
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                    TextField("Search requests...", text: $searchText)
-                        .textFieldStyle(.plain)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Search").font(.caption).foregroundColor(.secondary)
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                        TextField("Search requests...", text: $searchText)
+                            .textFieldStyle(.plain)
+                    }
+                    .padding(8)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .cornerRadius(8)
+                    .frame(width: 200)
                 }
-                .padding(8)
-                .background(Color(NSColor.controlBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                )
-                .cornerRadius(8)
-                .frame(width: 200)
                 
                 VStack(spacing: 2) {
                     HStack {
@@ -457,7 +492,7 @@ struct InvestmentRequestsView: View {
                         SortableColumnHeader(title: "Theater", column: .theater, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.theater) })
                             .frame(width: 90, alignment: .leading)
                         
-                        SortableColumnHeader(title: "Industry", column: .industry, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.industry) })
+                        SortableColumnHeader(title: "Region", column: .industry, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.industry) })
                             .frame(width: 90, alignment: .leading)
                         
                         SortableColumnHeader(title: "Quarter", column: .quarter, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.quarter) })
@@ -469,10 +504,7 @@ struct InvestmentRequestsView: View {
                         SortableColumnHeader(title: "Status", column: .status, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.status) })
                             .frame(width: 100, alignment: .center)
                         
-                        Text("Next Approver")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
+                        SortableColumnHeader(title: "Next Approver", column: .nextApprover, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.nextApprover) })
                             .frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
                         
                         Text("Actions")
@@ -577,7 +609,7 @@ struct InvestmentRequestsView: View {
         case "DM_APPROVED": return "DM Approved"
         case "RD_APPROVED": return "RD Approved"
         case "AVP_APPROVED": return "AVP Approved"
-        case "FINAL_APPROVED": return "Approved"
+        case "FINAL_APPROVED": return "Approved for IC"
         case "REJECTED": return "Rejected"
         default: return status
         }
@@ -703,15 +735,7 @@ struct RequestTableRow: View {
     
     private var industryShortName: String {
         guard let industry = request.industrySegment else { return "—" }
-        switch industry {
-        case "Financial Services": return "FSI"
-        case "Healthcare & Life Sciences": return "HCLS"
-        case "Manufacturing": return "MFG"
-        case "Communications, Media & Entertainment": return "CME"
-        case "Retail & Consumer Goods": return "RCG"
-        case "FSI Globals": return "FSI Globals"
-        default: return industry
-        }
+        return industry
     }
     
     var body: some View {
@@ -873,12 +897,14 @@ struct NewRequestView: View {
     @State private var isSearching = false
     @State private var investmentType = ""
     @State private var amount = ""
+    @FocusState private var amountFocused: Bool
     @State private var quarter = ""
     @State private var theater = "US Majors"
     @State private var industrySegment = ""
     @State private var justification = ""
     @State private var expectedOutcome = ""
     @State private var riskAssessment = ""
+    @State private var sfdcOpportunityURL = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
     
@@ -902,6 +928,11 @@ struct NewRequestView: View {
     
     private let investmentTypes = ["Professional Services", "Customer Success", "Training", "Support", "Partnership", "Other"]
     private let theaters = ["US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]
+    
+    private var regionsForTheater: [String] {
+        let regions = dataService.sfdcIndustriesByTheater[theater] ?? []
+        return regions.isEmpty ? [] : regions
+    }
     
     private var availableQuarters: [String] {
         let now = Date()
@@ -1036,6 +1067,10 @@ struct NewRequestView: View {
                                     TextField("$0", text: $amount)
                                         .textFieldStyle(.roundedBorder)
                                         .frame(width: 120)
+                                        .focused($amountFocused)
+                                        .onChange(of: amountFocused) { _, focused in
+                                            if !focused { amount = Self.formatCurrencyInput(amount) }
+                                        }
                                 }
                             }
                             
@@ -1054,10 +1089,18 @@ struct NewRequestView: View {
                                     .labelsHidden()
                                 }
                                 
-                                LabeledField(label: "Industry Segment") {
-                                    TextField("Enter segment", text: $industrySegment)
-                                        .textFieldStyle(.roundedBorder)
+                                LabeledField(label: "Region") {
+                                    Picker("", selection: $industrySegment) {
+                                        Text("Select...").tag("")
+                                        ForEach(regionsForTheater, id: \.self) { Text($0) }
+                                    }
+                                    .labelsHidden()
                                 }
+                            }
+                            
+                            LabeledField(label: "Salesforce Opportunity URL (Optional Until Approved for IC)") {
+                                TextField("https://snowflakecomputing.my.salesforce.com/...", text: $sfdcOpportunityURL)
+                                    .textFieldStyle(.roundedBorder)
                             }
                         }
                         .padding()
@@ -1101,7 +1144,13 @@ struct NewRequestView: View {
                 Spacer()
                 
                 Button("Save as Draft") {
-                    saveRequest()
+                    saveRequest(submit: false)
+                }
+                .buttonStyle(.bordered)
+                .disabled(title.isEmpty || isSaving)
+                
+                Button("Submit for Approval") {
+                    saveRequest(submit: true)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(title.isEmpty || isSaving)
@@ -1129,7 +1178,7 @@ struct NewRequestView: View {
         }
     }
     
-    private func saveRequest() {
+    private func saveRequest(submit: Bool) {
         isSaving = true
         errorMessage = nil
         
@@ -1146,7 +1195,9 @@ struct NewRequestView: View {
             expectedOutcome: expectedOutcome.isEmpty ? nil : expectedOutcome,
             riskAssessment: riskAssessment.isEmpty ? nil : riskAssessment,
             theater: theater,
-            industrySegment: industrySegment.isEmpty ? nil : industrySegment
+            industrySegment: industrySegment.isEmpty ? nil : industrySegment,
+            salesforceURL: sfdcOpportunityURL.isEmpty ? nil : sfdcOpportunityURL,
+            autoSubmit: submit
         ) { success, _ in
             isSaving = false
             if success {
@@ -1155,6 +1206,18 @@ struct NewRequestView: View {
                 errorMessage = "Failed to create request. Please try again."
             }
         }
+    }
+
+    static func formatCurrencyInput(_ input: String) -> String {
+        let stripped = input.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        guard let value = Double(stripped), value > 0 else { return input }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        if let formatted = formatter.string(from: NSNumber(value: value)) {
+            return "$\(formatted)"
+        }
+        return input
     }
 }
 
@@ -1185,6 +1248,7 @@ struct RequestDetailView: View {
     @EnvironmentObject var dataService: DataService
     @State private var showingSubmitConfirm = false
     @State private var showingWithdrawConfirm = false
+    @State private var showingCancelConfirm = false
     @State private var linkedOpportunities: [SFDCOpportunity] = []
     @State private var isSaving = false
     
@@ -1195,13 +1259,19 @@ struct RequestDetailView: View {
     @State private var isSearching = false
     @State private var editedInvestmentType: String = ""
     @State private var editedAmount: String = ""
+    @FocusState private var editedAmountFocused: Bool
     @State private var editedQuarter: String = ""
     @State private var editedTheater: String = "US Majors"
     @State private var editedIndustrySegment: String = ""
     @State private var editedJustification: String = ""
     @State private var editedOutcome: String = ""
     @State private var editedRisk: String = ""
+    @State private var editedSfdcURL: String = ""
     @State private var errorMessage: String?
+    @State private var sfdcInvestmentStatus: SFDCInvestmentStatus?
+    @State private var isLoadingSFDCStatus = false
+    @State private var sfdcLinkInput: String = ""
+    @State private var isSavingSFDCLink = false
     
     private var isEditable: Bool {
         mode == .edit || mode == .revise
@@ -1213,6 +1283,11 @@ struct RequestDetailView: View {
     
     private let investmentTypes = ["Professional Services", "Customer Success", "Training", "Support", "Partnership", "Other"]
     private let theaters = ["US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]
+    
+    private var regionsForEditedTheater: [String] {
+        let regions = dataService.sfdcIndustriesByTheater[editedTheater] ?? []
+        return regions.isEmpty ? [] : regions
+    }
     
     private var availableQuarters: [String] {
         let now = Date()
@@ -1272,7 +1347,7 @@ struct RequestDetailView: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if mode == .edit {
+                    if mode == .edit || mode == .revise {
                         GroupBox("Request Details") {
                             VStack(alignment: .leading, spacing: 12) {
                                 LabeledField(label: "Title") {
@@ -1351,6 +1426,10 @@ struct RequestDetailView: View {
                                         TextField("$0", text: $editedAmount)
                                             .textFieldStyle(.roundedBorder)
                                             .frame(width: 120)
+                                            .focused($editedAmountFocused)
+                                            .onChange(of: editedAmountFocused) { _, focused in
+                                                if !focused { editedAmount = NewRequestView.formatCurrencyInput(editedAmount) }
+                                            }
                                     }
                                 }
                                 
@@ -1367,10 +1446,18 @@ struct RequestDetailView: View {
                                         }
                                         .labelsHidden()
                                     }
-                                    LabeledField(label: "Industry Segment") {
-                                        TextField("Enter segment", text: $editedIndustrySegment)
-                                            .textFieldStyle(.roundedBorder)
+                                    LabeledField(label: "Region") {
+                                        Picker("", selection: $editedIndustrySegment) {
+                                            Text("Select...").tag("")
+                                            ForEach(regionsForEditedTheater, id: \.self) { Text($0) }
+                                        }
+                                        .labelsHidden()
                                     }
+                                }
+                                
+                                LabeledField(label: "Salesforce Opportunity URL (Optional Until Approved for IC)") {
+                                    TextField("https://snowflakecomputing.my.salesforce.com/...", text: $editedSfdcURL)
+                                        .textFieldStyle(.roundedBorder)
                                 }
                             }
                             .padding()
@@ -1405,39 +1492,58 @@ struct RequestDetailView: View {
                     } else {
                         GroupBox("Request Details") {
                             VStack(alignment: .leading, spacing: 12) {
-                                DetailRow(label: "Account", value: request.accountName ?? "—")
-                                DetailRow(label: "Investment Type", value: request.investmentType ?? "—")
-                                DetailRow(label: "Amount", value: request.formattedAmount)
-                                DetailRow(label: "Quarter", value: request.investmentQuarter ?? "—")
-                                DetailRow(label: "Theater", value: request.theater ?? "—")
-                                DetailRow(label: "Industry Segment", value: request.industrySegment ?? "—")
+                                LabeledField(label: "Title") {
+                                    Text(request.requestTitle)
+                                }
+
+                                LabeledField(label: "Account") {
+                                    Text(request.accountName ?? "—")
+                                }
+
+                                HStack(spacing: 16) {
+                                    LabeledField(label: "Investment Type") {
+                                        Text(request.investmentType ?? "—")
+                                    }
+                                    LabeledField(label: "Amount") {
+                                        Text(request.formattedAmount)
+                                    }
+                                }
+
+                                HStack(spacing: 16) {
+                                    LabeledField(label: "Quarter") {
+                                        Text(request.investmentQuarter ?? "—")
+                                    }
+                                    LabeledField(label: "Theater") {
+                                        Text(request.theater ?? "—")
+                                    }
+                                    LabeledField(label: "Region") {
+                                        Text(request.industrySegment ?? "—")
+                                    }
+                                }
+
+                                LabeledField(label: "Salesforce Opportunity URL (Optional Until Approved for IC)") {
+                                    if let sfdcLink = request.sfdcOpportunityLink, !sfdcLink.isEmpty {
+                                        Link(sfdcLink, destination: URL(string: sfdcLink) ?? URL(string: "about:blank")!)
+                                            .foregroundColor(.blue)
+                                    } else {
+                                        Text("—")
+                                    }
+                                }
                             }
                             .padding()
                         }
-                        
+
                         GroupBox("Business Case") {
                             VStack(alignment: .leading, spacing: 12) {
-                                if mode == .revise {
                                     LabeledField(label: "Business Justification") {
-                                        TextField("Enter justification...", text: $editedJustification, axis: .vertical)
-                                            .lineLimit(3...6)
-                                            .textFieldStyle(.roundedBorder)
+                                        Text(request.businessJustification ?? "—")
                                     }
                                     LabeledField(label: "Expected Outcome") {
-                                        TextField("Enter expected outcome...", text: $editedOutcome, axis: .vertical)
-                                            .lineLimit(3...6)
-                                            .textFieldStyle(.roundedBorder)
+                                        Text(request.expectedOutcome ?? "—")
                                     }
                                     LabeledField(label: "Risk Assessment") {
-                                        TextField("Enter risk assessment...", text: $editedRisk, axis: .vertical)
-                                            .lineLimit(3...6)
-                                            .textFieldStyle(.roundedBorder)
+                                        Text(request.riskAssessment ?? "—")
                                     }
-                                } else {
-                                    DetailRow(label: "Business Justification", value: request.businessJustification ?? "—")
-                                    DetailRow(label: "Expected Outcome", value: request.expectedOutcome ?? "—")
-                                    DetailRow(label: "Risk Assessment", value: request.riskAssessment ?? "—")
-                                }
                             }
                             .padding()
                         }
@@ -1453,17 +1559,81 @@ struct RequestDetailView: View {
                         }
                     }
                     
-                    if mode != .edit {
-                        GroupBox("Approval Status") {
+                    GroupBox("Pre-IC Request Approval") {
                             VStack(alignment: .leading, spacing: 12) {
-                                DetailRow(label: "Created By", value: request.createdByName ?? "—")
-                                DetailRow(label: "Current Status", value: request.statusDisplayName)
+                                LabeledField(label: "Created By") {
+                                    Text(request.createdByName ?? "—")
+                                }
+                                LabeledField(label: "Current Status") {
+                                    Text(request.statusDisplayName)
+                                }
                                 
                                 if let nextApprover = request.nextApproverName, !request.isFinalApproved && request.status != "REJECTED" {
-                                    DetailRow(label: "Pending Approval", value: "\(nextApprover)\(request.nextApproverTitle != nil ? " (\(request.nextApproverTitle!))" : "")")
+                                    LabeledField(label: "Pending Approval") {
+                                        Text("\(nextApprover)\(request.nextApproverTitle != nil ? " (\(request.nextApproverTitle!))" : "")")
+                                    }
                                 }
                             }
                             .padding()
+                        }
+
+                        if request.isFinalApproved {
+                            GroupBox("Salesforce Investment Status") {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    if let sfdcLink = request.sfdcOpportunityLink, !sfdcLink.isEmpty {
+                                        if isLoadingSFDCStatus {
+                                            HStack {
+                                                ProgressView()
+                                                    .scaleEffect(0.8)
+                                                Text("Loading Salesforce status...")
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        } else if let status = sfdcInvestmentStatus {
+                                            LabeledField(label: "Opportunity") {
+                                                Text(status.opportunityName)
+                                            }
+                                            LabeledField(label: "Stage") {
+                                                Text(status.stageName)
+                                            }
+                                            LabeledField(label: "SFDC Approval Status") {
+                                                Text(status.approvalStatus)
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(sfdcApprovalColor(status.approvalStatus))
+                                            }
+                                            HStack {
+                                                Spacer()
+                                                Button(action: { refreshSFDCStatus() }) {
+                                                    Label("Refresh", systemImage: "arrow.clockwise")
+                                                }
+                                                .buttonStyle(.bordered)
+                                            }
+                                        } else {
+                                            Text("Could not load Salesforce status")
+                                                .foregroundColor(.secondary)
+                                            HStack {
+                                                Spacer()
+                                                Button(action: { refreshSFDCStatus() }) {
+                                                    Label("Retry", systemImage: "arrow.clockwise")
+                                                }
+                                                .buttonStyle(.bordered)
+                                            }
+                                        }
+                                    } else {
+                                        Text("Link a Salesforce Opportunity to track investment status")
+                                            .foregroundColor(.secondary)
+                                        HStack(spacing: 8) {
+                                            TextField("Salesforce Opportunity URL", text: $sfdcLinkInput)
+                                                .textFieldStyle(.roundedBorder)
+                                            Button("Save") {
+                                                saveSFDCLink()
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .disabled(sfdcLinkInput.isEmpty || isSavingSFDCLink)
+                                        }
+                                    }
+                                }
+                                .padding()
+                            }
                         }
                         
                         if request.dmApprovedBy != nil || request.rdApprovedBy != nil || request.avpApprovedBy != nil || request.gvpApprovedBy != nil {
@@ -1509,7 +1679,6 @@ struct RequestDetailView: View {
                                 .padding()
                             }
                         }
-                    }
                     
                     if !linkedOpportunities.isEmpty {
                         GroupBox("Linked Opportunities") {
@@ -1567,6 +1736,23 @@ struct RequestDetailView: View {
                         showingWithdrawConfirm = true
                     }
                     .buttonStyle(.bordered)
+                    .tint(.orange)
+                }
+                
+                if mode == .edit && request.status != "CANCELLED" {
+                    if request.status == "DRAFT" {
+                        Button("Withdraw") {
+                            showingCancelConfirm = true
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    } else {
+                        Button("Cancel Request") {
+                            showingCancelConfirm = true
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
                 }
                 
                 Spacer()
@@ -1582,7 +1768,7 @@ struct RequestDetailView: View {
         .onAppear {
             editedTitle = request.requestTitle
             if let name = request.accountName {
-                editedAccount = SFDCAccount(accountId: request.accountId ?? "", accountName: name, theater: request.theater, industrySegment: request.industrySegment)
+                editedAccount = SFDCAccount(accountId: request.accountId ?? "", accountName: name, theater: request.theater, industrySegment: request.industrySegment, region: nil)
             }
             editedInvestmentType = request.investmentType ?? ""
             if let amt = request.requestedAmount {
@@ -1597,8 +1783,12 @@ struct RequestDetailView: View {
             editedJustification = request.businessJustification ?? ""
             editedOutcome = request.expectedOutcome ?? ""
             editedRisk = request.riskAssessment ?? ""
+            editedSfdcURL = request.sfdcOpportunityLink ?? ""
             dataService.loadLinkedOpportunities(for: request.requestId) { opps in
                 linkedOpportunities = opps
+            }
+            if request.isFinalApproved, let sfdcLink = request.sfdcOpportunityLink, !sfdcLink.isEmpty {
+                refreshSFDCStatus()
             }
         }
         .alert("Withdraw Request", isPresented: $showingWithdrawConfirm) {
@@ -1612,6 +1802,18 @@ struct RequestDetailView: View {
             }
         } message: {
             Text("Withdraw this request back to Draft status? This will clear approvals from the current level forward.")
+        }
+        .alert(request.status == "DRAFT" ? "Withdraw Request" : "Cancel Request", isPresented: $showingCancelConfirm) {
+            Button("Keep Request", role: .cancel) {}
+            Button(request.status == "DRAFT" ? "Withdraw" : "Cancel Request", role: .destructive) {
+                dataService.cancelRequest(requestId: request.requestId) { success, error in
+                    if success {
+                        isPresented = false
+                    }
+                }
+            }
+        } message: {
+            Text(request.status == "DRAFT" ? "Withdraw this draft request? It will be marked as Cancelled." : "Permanently cancel this request? It will be marked as Cancelled and remain viewable.")
         }
     }
     
@@ -1644,6 +1846,7 @@ struct RequestDetailView: View {
             riskAssessment: editedRisk.isEmpty ? nil : editedRisk,
             theater: editedTheater,
             industrySegment: editedIndustrySegment.isEmpty ? nil : editedIndustrySegment,
+            salesforceURL: editedSfdcURL.isEmpty ? nil : editedSfdcURL,
             autoSubmit: submit
         ) { success in
             isSaving = false
@@ -1657,8 +1860,18 @@ struct RequestDetailView: View {
     
     private func saveRevision(submit: Bool) {
         isSaving = true
+        let amountValue = Double(editedAmount.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: ""))
         dataService.reviseRequest(
             requestId: request.requestId,
+            title: editedTitle,
+            accountId: editedAccount?.accountId,
+            accountName: editedAccount?.accountName,
+            investmentType: editedInvestmentType.isEmpty ? nil : editedInvestmentType,
+            amount: amountValue,
+            quarter: editedQuarter,
+            theater: editedTheater,
+            industrySegment: editedIndustrySegment.isEmpty ? nil : editedIndustrySegment,
+            salesforceURL: editedSfdcURL.isEmpty ? nil : editedSfdcURL,
             justification: editedJustification,
             outcome: editedOutcome,
             risk: editedRisk,
@@ -1668,6 +1881,35 @@ struct RequestDetailView: View {
             if success {
                 isPresented = false
             }
+        }
+    }
+
+    private func refreshSFDCStatus() {
+        guard let sfdcLink = request.sfdcOpportunityLink, !sfdcLink.isEmpty else { return }
+        isLoadingSFDCStatus = true
+        dataService.fetchSFDCOpportunityStatus(url: sfdcLink) { status in
+            isLoadingSFDCStatus = false
+            sfdcInvestmentStatus = status
+        }
+    }
+
+    private func saveSFDCLink() {
+        guard !sfdcLinkInput.isEmpty else { return }
+        isSavingSFDCLink = true
+        dataService.updateSFDCLink(requestId: request.requestId, url: sfdcLinkInput) { success in
+            isSavingSFDCLink = false
+            if success {
+                refreshSFDCStatus()
+            }
+        }
+    }
+
+    private func sfdcApprovalColor(_ status: String) -> Color {
+        switch status {
+        case "Approved": return .green
+        case "Pending": return .orange
+        case "Rejected": return .red
+        default: return .secondary
         }
     }
 }

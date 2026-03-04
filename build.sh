@@ -13,11 +13,15 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
+# Auto-increment build number
+OLD_BUILD=$(jq -r '.build_number' "$CONFIG_FILE")
+BUILD_NUMBER=$((OLD_BUILD + 1))
+jq --arg bn "$BUILD_NUMBER" '.build_number = $bn' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+
 # Parse config
 APP_NAME=$(jq -r '.app_name' "$CONFIG_FILE")
 BUNDLE_ID=$(jq -r '.bundle_id' "$CONFIG_FILE")
 VERSION=$(jq -r '.version' "$CONFIG_FILE")
-BUILD_NUMBER=$(jq -r '.build_number' "$CONFIG_FILE")
 ICON=$(jq -r '.icon' "$CONFIG_FILE")
 API_PORT=$(jq -r '.api_port' "$CONFIG_FILE")
 CACHE_DB=$(jq -r '.cache_db' "$CONFIG_FILE")
@@ -53,7 +57,8 @@ enum GitVersion {
     static let hash = "${GIT_HASH}"
     static let tag = "${GIT_TAG}"
     static let branch = "${GIT_BRANCH}"
-    static let display = "${VERSION} (${GIT_HASH})"
+    static let build = "${BUILD_NUMBER}"
+    static let display = "${VERSION}.${BUILD_NUMBER} (${GIT_HASH})"
 }
 EOF
 echo "Generated GitVersion.swift (${GIT_TAG})"
