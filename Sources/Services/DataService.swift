@@ -52,9 +52,11 @@ class DataService: ObservableObject {
     }()
     
     private func ensureServerRunning(completion: @escaping (Bool) -> Void) {
+        var serverStartAttempts = 0
+
         func checkHealth(attempt: Int) {
-            guard attempt < 30 else {
-                print("API server not responding after 30 attempts")
+            guard attempt < 60 else {
+                print("API server not responding after 60 attempts")
                 completion(false)
                 return
             }
@@ -69,21 +71,14 @@ class DataService: ObservableObject {
                     return
                 }
                 
-                if attempt == 0 {
-                    print("API server not running, starting it...")
-                    self?.startAPIServer { success in
-                        if success {
-                            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-                                checkHealth(attempt: attempt + 1)
-                            }
-                        } else {
-                            completion(false)
-                        }
-                    }
-                } else {
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-                        checkHealth(attempt: attempt + 1)
-                    }
+                if serverStartAttempts < 5 && attempt % 10 == 0 {
+                    serverStartAttempts += 1
+                    print("Attempting to start API server (\(serverStartAttempts))...")
+                    self?.startAPIServer { _ in }
+                }
+
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                    checkHealth(attempt: attempt + 1)
                 }
             }.resume()
         }
@@ -92,17 +87,29 @@ class DataService: ObservableObject {
     }
     
     private func startAPIServer(completion: @escaping (Bool) -> Void) {
+        startAPIServer(attempt: 0, completion: completion)
+    }
+
+    private func startAPIServer(attempt: Int, completion: @escaping (Bool) -> Void) {
+        let maxAttempts = 10
         let serverPath = "\(NSHomeDirectory())/Documents/projects/Planned-Investment-Governance/api_server.py"
         let serverDir = (serverPath as NSString).deletingLastPathComponent
-        
-        guard FileManager.default.fileExists(atPath: serverPath) else {
-            print("Could not find api_server.py at: \(serverPath)")
-            DispatchQueue.main.async { completion(false) }
+
+        if !FileManager.default.fileExists(atPath: serverPath) {
+            if attempt < maxAttempts {
+                print("api_server.py not accessible yet (attempt \(attempt + 1)/\(maxAttempts)), waiting for folder access...")
+                DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.startAPIServer(attempt: attempt + 1, completion: completion)
+                }
+            } else {
+                print("Could not find api_server.py after \(maxAttempts) attempts: \(serverPath)")
+                DispatchQueue.main.async { completion(false) }
+            }
             return
         }
-        
+
         print("Starting API server from: \(serverPath)")
-        
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3")
         process.arguments = [serverPath]
@@ -111,7 +118,7 @@ class DataService: ObservableObject {
         env["SNOWFLAKE_CONNECTION_NAME"] = "DemoAcct"
         process.environment = env
         process.standardInput = FileHandle.nullDevice
-        
+
         let logPath = "\(serverDir)/api_server.log"
         FileManager.default.createFile(atPath: logPath, contents: nil, attributes: nil)
         if let logHandle = FileHandle(forWritingAtPath: logPath) {
@@ -121,15 +128,15 @@ class DataService: ObservableObject {
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
         }
-        
+
         do {
             try process.run()
             serverProcess = process
-            
+
             DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
                 let healthURL = URL(string: "http://localhost:8770/api/health")!
                 let request = URLRequest(url: healthURL, timeoutInterval: 2)
-                
+
                 self.session.dataTask(with: request) { _, response, _ in
                     if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                         print("API server started successfully")
@@ -153,7 +160,7 @@ class DataService: ObservableObject {
         }
         
         let healthURL = URL(string: "http://127.0.0.1:8770/api/health")!
-        var serverStarted = false
+        var serverStartAttempts = 0
         
         func tryConnect(attempt: Int) {
             guard attempt < 120 else {
@@ -185,8 +192,8 @@ class DataService: ObservableObject {
                     self.loadInvestmentRequests {}
                     self.loadAnnualBudgets {}
                 } else {
-                    if !serverStarted {
-                        serverStarted = true
+                    if serverStartAttempts < 3 && attempt % 20 == 0 {
+                        serverStartAttempts += 1
                         self.startAPIServer { _ in }
                     }
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
@@ -657,6 +664,10 @@ class DataService: ObservableObject {
                     }
                     self.loadInvestmentRequests()
                     self.loadSummary()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        self.loadInvestmentRequests()
+                        self.loadSummary()
+                    }
                     completion(true, requestId)
                 } else {
                     completion(false, nil)

@@ -5,8 +5,6 @@ from helpers import (
     IN_REVIEW_STATUSES,
     portfolios_for_theater,
     get_all_quarter_options_flat,
-    normalize_theater,
-    db_codes_for_theater,
 )
 
 
@@ -108,8 +106,7 @@ def apply_filters(requests_list, filters, user=None, team_ids=None):
     result = list(requests_list)
 
     if filters.get("theater"):
-        codes = db_codes_for_theater(filters["theater"])
-        result = [r for r in result if normalize_theater(r.get("theater", "")) == filters["theater"] or r.get("theater", "") in codes]
+        result = [r for r in result if r.get("theater", "") == filters["theater"]]
 
     if filters.get("industries"):
         result = [r for r in result if r.get("industry_segment") in filters["industries"]]
@@ -129,6 +126,8 @@ def apply_filters(requests_list, filters, user=None, team_ids=None):
             r for r in result
             if q in (r.get("request_title") or "").lower()
             or q in (r.get("account_name") or "").lower()
+            or q in (r.get("created_by_name") or "").lower()
+            or q in (r.get("next_approver_name") or "").lower()
         ]
 
     if filters.get("pending_my_approval") and user:

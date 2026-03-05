@@ -12,6 +12,7 @@ from helpers import (
     get_current_fiscal_quarter,
     portfolios_for_theater,
     normalize_theater,
+    portfolio_name_for_region,
     can_edit,
     can_revise,
     can_withdraw,
@@ -134,12 +135,29 @@ def _request_form(mode="new", request=None):
     selected_account = None
     if len(account_search) >= 2 and account_search != defaults.get("account_name", ""):
         try:
-            results = db.search_accounts(account_search)
+            results, total_matches = db.search_accounts(account_search)
             if results:
-                options = {f"{a['account_name']} ({a.get('theater', '')})": a for a in results[:8]}
+                def _account_label(a):
+                    label = a['account_name']
+                    geo_parts = []
+                    t = normalize_theater(a.get('theater') or '')
+                    r = portfolio_name_for_region(a.get('region') or '')
+                    if t and r:
+                        geo_parts.append(f"{t} · {r}")
+                    elif t:
+                        geo_parts.append(t)
+                    loc_parts = [x for x in [a.get('billing_city'), a.get('billing_state'), a.get('billing_country')] if x]
+                    if loc_parts:
+                        geo_parts.append(', '.join(loc_parts))
+                    if geo_parts:
+                        label += '  —  ' + ' | '.join(geo_parts)
+                    return label
+                options = {_account_label(a): a for a in results}
                 choice = st.selectbox("Select account", list(options.keys()), key="form_account_select")
                 if choice:
                     selected_account = options[choice]
+                if total_matches > 20:
+                    st.caption(f"{total_matches - 20} more matches — type more to narrow results")
         except Exception:
             pass
 
@@ -189,10 +207,12 @@ def _request_form(mode="new", request=None):
             theater_idx = theater_options.index(theater_val)
         theater = st.selectbox("Theater", theater_options, index=theater_idx, key="form_theater")
     with c6:
-        region_options = portfolios_for_theater(theater)
+        effective_theater = theater_val if selected_account and theater_val else theater
+        region_options = portfolios_for_theater(effective_theater)
         ind_default = ""
         if selected_account:
-            ind_default = selected_account.get("industry_segment", "")
+            raw_region = selected_account.get("region", "")
+            ind_default = portfolio_name_for_region(raw_region)
         elif defaults.get("industry_segment"):
             ind_default = defaults["industry_segment"]
         region_idx = 0
@@ -272,6 +292,7 @@ def _request_form(mode="new", request=None):
                 else:
                     db.create_request(data)
                     st.toast("Request created", icon=":material/check:")
+                st.session_state["requests_data"] = db.get_requests()
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -288,6 +309,7 @@ def _request_form(mode="new", request=None):
                 else:
                     db.create_request(data)
                     st.toast("Request created and submitted", icon=":material/send:")
+                st.session_state["requests_data"] = db.get_requests()
                 st.rerun()
             except Exception as e:
                 st.error(str(e))

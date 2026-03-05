@@ -440,7 +440,7 @@ struct DashboardView: View {
     
     var filteredRequests: [InvestmentRequest] {
         dataService.investmentRequests.filter { request in
-            let matchesTheater = selectedTheater == "All" || TheaterMapping.dbCodes(forDisplayName: selectedTheater).contains(request.theater ?? "")
+            let matchesTheater = selectedTheater == "All" || request.theater == selectedTheater
             let matchesIndustry: Bool
             if selectedIndustries.isEmpty {
                 matchesIndustry = true

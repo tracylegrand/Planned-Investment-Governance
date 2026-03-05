@@ -64,27 +64,14 @@ PIPELINE_STAGES = [
 ]
 
 _THEATERS_DISPLAY_FALLBACK = [
-    "US Majors",
-    "US Public Sector",
-    "Americas Enterprise",
-    "Americas Acquisition",
+    "USMajors",
+    "USPubSec",
+    "AMSExpansion",
+    "AMSAcquisition",
     "EMEA",
     "APJ",
 ]
 
-_THEATER_DB_CODES = {
-    "US Majors": ["USMajors"],
-    "US Public Sector": ["USPubSec"],
-    "Americas Enterprise": ["AMSExpansion", "AMSPartner", "AMSEnt"],
-    "Americas Acquisition": ["AMSAcquisition"],
-    "EMEA": ["EMEA"],
-    "APJ": ["APJ", "APAC"],
-}
-
-_DB_TO_DISPLAY = {}
-for _display, _codes in _THEATER_DB_CODES.items():
-    for _c in _codes:
-        _DB_TO_DISPLAY[_c] = _display
 
 
 def get_theaters_display():
@@ -97,7 +84,7 @@ def get_portfolios_by_theater():
     return data.get("industries_by_theater", {})
 
 INDUSTRY_ABBREVIATIONS = {
-    "CME (TMT)": "CME",
+    "TMT": "TMT",
     "FSI": "FSI",
     "FSIGlobals": "FSIG",
     "HCLS": "HCLS",
@@ -107,17 +94,22 @@ INDUSTRY_ABBREVIATIONS = {
 
 
 def display_name_for_theater(db_code):
-    return _DB_TO_DISPLAY.get(db_code, db_code)
+    return db_code
 
 
 def db_codes_for_theater(display):
-    return _THEATER_DB_CODES.get(display, [display])
+    return [display]
 
 
 def normalize_theater(value):
-    if value in _DB_TO_DISPLAY:
-        return _DB_TO_DISPLAY[value]
     return value
+
+
+REGION_TO_PORTFOLIO = {"CME": "TMT", "TMT": "TMT", "RetailCG": "RCG"}
+
+
+def portfolio_name_for_region(region):
+    return REGION_TO_PORTFOLIO.get(region, region) if region else ""
 
 
 def portfolios_for_theater(theater):

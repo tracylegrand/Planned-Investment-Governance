@@ -29,10 +29,7 @@ The Investment Governance application sources data from three primary systems: S
 - **Business Case:** BUSINESS_JUSTIFICATION, EXPECTED_OUTCOME, RISK_ASSESSMENT (all VARCHAR max)
 - **Creator Info:** CREATED_BY (Snowflake username), CREATED_BY_NAME, CREATED_BY_EMPLOYEE_ID, CREATED_AT
 - **Status/Approval:** STATUS (default 'DRAFT'), CURRENT_APPROVAL_LEVEL (default 0), NEXT_APPROVER_ID, NEXT_APPROVER_NAME, NEXT_APPROVER_TITLE
-- **DM Approval:** DM_APPROVED_BY, DM_APPROVED_BY_TITLE, DM_APPROVED_AT, DM_COMMENTS
-- **RD Approval:** RD_APPROVED_BY, RD_APPROVED_BY_TITLE, RD_APPROVED_AT, RD_COMMENTS
-- **AVP Approval:** AVP_APPROVED_BY, AVP_APPROVED_BY_TITLE, AVP_APPROVED_AT, AVP_COMMENTS
-- **GVP/Final Approval:** GVP_APPROVED_BY, GVP_APPROVED_BY_TITLE, GVP_APPROVED_AT, GVP_COMMENTS
+- **Approval History:** Stored in `APPROVAL_STEPS` table (see 1.9). Legacy per-level columns (DM/RD/AVP/GVP_APPROVED_BY, etc.) remain in Snowflake for backward compatibility but are no longer used in the SQLite cache.
 - **Withdrawal:** WITHDRAWN_BY, WITHDRAWN_BY_NAME, WITHDRAWN_AT, WITHDRAWN_COMMENT
 - **Submission:** SUBMITTED_COMMENT, SUBMITTED_BY_NAME, SUBMITTED_AT
 - **Draft Comments:** DRAFT_COMMENT, DRAFT_BY_NAME, DRAFT_AT
@@ -120,7 +117,29 @@ The Investment Governance application sources data from three primary systems: S
 
 **Columns:** SUGGESTION_ID, REQUEST_ID, FIELD_NAME, SUGGESTED_VALUE, REASON, SUGGESTED_BY, SUGGESTED_AT, STATUS (default 'PENDING'), REVIEWED_BY, REVIEWED_AT
 
-### 1.8 AUDIT_LOG
+### 1.8 APPROVAL_STEPS
+
+| Attribute | Value |
+|---|---|
+| **Location** | `TEMP.INVESTMENT_GOVERNANCE.APPROVAL_STEPS` |
+| **Owner** | `TECHNICAL_ACCOUNT_MANAGER` role |
+| **Primary Key** | `STEP_ID` (autoincrement) |
+| **Purpose** | Single source of truth for all approval history. Each row represents one approval step in the chain for a request. |
+
+**Key Columns:** STEP_ID, REQUEST_ID, STEP_ORDER, APPROVER_EMPLOYEE_ID, APPROVER_NAME, APPROVER_TITLE, STATUS (PENDING/APPROVED), APPROVED_AT, COMMENTS, IS_FINAL_STEP, CREATED_AT
+
+### 1.9 FINAL_APPROVERS
+
+| Attribute | Value |
+|---|---|
+| **Location** | `TEMP.INVESTMENT_GOVERNANCE.FINAL_APPROVERS` |
+| **Owner** | `TECHNICAL_ACCOUNT_MANAGER` role |
+| **Primary Key** | `THEATER` |
+| **Purpose** | Defines the final approver (GVP-level) for each theater. Used to determine when the approval chain terminates. |
+
+**Key Columns:** THEATER, APPROVER_EMPLOYEE_ID, APPROVER_NAME, APPROVER_TITLE
+
+### 1.10 AUDIT_LOG
 
 | Attribute | Value |
 |---|---|
@@ -233,17 +252,16 @@ WHERE w.ACTIVE_STATUS = 1
 | **Location** | `cache.db` in project root (configurable via `config/standard.json`) |
 | **Purpose** | Local fast-access cache for the macOS client, avoiding round-trips to Snowflake for reads |
 
-### Cache Tables
+### Cache Tables (6 tables)
 
 | Table | Source | Refresh Trigger |
 |---|---|---|
-| `cached_users` | `TEMP.INVESTMENT_GOVERNANCE.USERS` | Full cache refresh on startup or timestamp mismatch |
-| `cached_current_user` | `TEMP.INVESTMENT_GOVERNANCE.VW_CURRENT_USER_INFO` | Full cache refresh on startup |
-| `cached_investment_requests` | `TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS` | Full refresh on startup; background refresh after every write operation |
-| `cached_accounts` | `TEMP.INVESTMENT_GOVERNANCE.SFDC_ACCOUNTS` | Dropped and recreated on every server start |
-| `cached_opportunities` | Reserved for future use | N/A |
 | `cache_metadata` | Tracks last Snowflake timestamps per data source | Updated after each refresh |
-| `pending_sync` | Tracks sync operations | Updated by sync mechanism |
+| `cached_current_user` | `TEMP.INVESTMENT_GOVERNANCE.VW_CURRENT_USER_INFO` | Full cache refresh on startup |
+| `cached_investment_requests` | `TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS` (36 columns, excludes legacy approval columns) | Full refresh on startup; background refresh after every write operation |
+| `cached_approval_steps` | `TEMP.INVESTMENT_GOVERNANCE.APPROVAL_STEPS` | Full refresh on startup; background refresh after every write operation |
+| `cached_accounts` | `FIVETRAN.SALESFORCE.ACCOUNT` | Dropped and recreated on every server start |
+| `cached_final_approvers` | `TEMP.INVESTMENT_GOVERNANCE.FINAL_APPROVERS` | Full cache refresh on startup |
 
 ### Cache Architecture
 

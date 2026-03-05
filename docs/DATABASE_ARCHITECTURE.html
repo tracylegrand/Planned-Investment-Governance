@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investment Governance - Database Architecture</title>
+<style>
+:root {
+    --snow-blue: #29B5E8;
+    --snow-dark: #11567F;
+    --snow-navy: #0D2B45;
+    --snow-light: #E8F7FC;
+    --bg: #F6F8FA;
+    --card-bg: #FFFFFF;
+    --text: #1E293B;
+    --text-muted: #64748B;
+    --border: #E2E8F0;
+    --green: #10B981;
+    --amber: #F59E0B;
+    --red: #EF4444;
+    --purple: #8B5CF6;
+    --orange: #F97316;
+    --slate: #475569;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.header { background: linear-gradient(135deg, var(--snow-navy) 0%, var(--snow-dark) 100%); color: white; padding: 48px 0; text-align: center; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 8px; }
+.header p { font-size: 1.1rem; opacity: 0.85; max-width: 700px; margin: 0 auto; }
+.container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+.nav-bar { display: flex; gap: 12px; margin-bottom: 32px; flex-wrap: wrap; }
+.nav-bar a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: var(--snow-dark); font-weight: 500; font-size: 0.9rem; transition: all 0.2s; }
+.nav-bar a:hover { border-color: var(--snow-blue); background: var(--snow-light); }
+.nav-bar a.active { background: var(--snow-blue); color: white; border-color: var(--snow-blue); }
+code { background: #F1F5F9; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; color: var(--snow-dark); font-family: 'SF Mono', 'Fira Code', monospace; }
+
+.diagram-canvas {
+    background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+    border-radius: 16px;
+    padding: 40px 32px;
+    margin: 24px 0;
+    position: relative;
+    overflow: visible;
+}
+.diagram-title {
+    color: white;
+    font-size: 1.1rem;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 32px;
+    letter-spacing: 0.5px;
+}
+
+.layer {
+    margin-bottom: 8px;
+}
+.layer-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 4px 12px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 10px;
+}
+.layer-label-client { background: rgba(41, 181, 232, 0.2); color: #7DD3FC; }
+.layer-label-api { background: rgba(16, 185, 129, 0.2); color: #6EE7B7; }
+.layer-label-cache { background: rgba(249, 115, 22, 0.2); color: #FDBA74; }
+.layer-label-snowflake { background: rgba(41, 181, 232, 0.2); color: #7DD3FC; }
+.layer-label-source { background: rgba(139, 92, 246, 0.2); color: #C4B5FD; }
+
+.boxes { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+
+.db-box {
+    border-radius: 10px;
+    padding: 14px 18px;
+    min-width: 160px;
+    position: relative;
+    transition: transform 0.2s;
+}
+.db-box:hover { transform: translateY(-2px); }
+.db-box .box-title { font-weight: 700; font-size: 0.88rem; margin-bottom: 3px; }
+.db-box .box-subtitle { font-size: 0.72rem; opacity: 0.7; }
+.db-box .box-detail { font-size: 0.72rem; opacity: 0.55; margin-top: 4px; }
+.db-box .box-tables { font-size: 0.68rem; opacity: 0.6; margin-top: 6px; line-height: 1.5; }
+
+.box-client {
+    background: rgba(41, 181, 232, 0.12);
+    border: 1.5px solid rgba(41, 181, 232, 0.4);
+    color: white;
+}
+.box-api {
+    background: rgba(16, 185, 129, 0.15);
+    border: 1.5px solid rgba(16, 185, 129, 0.5);
+    color: white;
+}
+.box-cache {
+    background: rgba(249, 115, 22, 0.12);
+    border: 1.5px solid rgba(249, 115, 22, 0.45);
+    color: white;
+}
+.box-snowflake {
+    background: rgba(41, 181, 232, 0.1);
+    border: 1.5px solid rgba(41, 181, 232, 0.35);
+    color: white;
+}
+.box-source {
+    background: rgba(139, 92, 246, 0.1);
+    border: 1.5px solid rgba(139, 92, 246, 0.4);
+    color: white;
+}
+.box-rw { border-color: rgba(16, 185, 129, 0.6); }
+.box-ro { border-color: rgba(245, 158, 11, 0.5); }
+
+.connector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 10px 0;
+    color: rgba(255,255,255,0.5);
+    font-size: 0.72rem;
+}
+.connector .arrow { font-size: 1.4rem; color: rgba(255,255,255,0.35); }
+.connector .arrow-up-down { font-size: 1.2rem; }
+.connector-label {
+    background: rgba(255,255,255,0.08);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.68rem;
+    color: rgba(255,255,255,0.6);
+    white-space: nowrap;
+}
+
+.badge-rw { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 600; background: rgba(16, 185, 129, 0.2); color: #6EE7B7; }
+.badge-ro { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 600; background: rgba(245, 158, 11, 0.2); color: #FCD34D; }
+.badge-cache { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 600; background: rgba(249, 115, 22, 0.2); color: #FDBA74; }
+
+.legend {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 24px;
+    flex-wrap: wrap;
+}
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.6);
+}
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+h2 { font-size: 1.5rem; font-weight: 700; color: var(--snow-navy); margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--snow-blue); }
+h3 { font-size: 1.15rem; font-weight: 600; color: var(--snow-dark); margin: 24px 0 12px; }
+.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.section-intro { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 20px; line-height: 1.7; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+th { background: var(--snow-navy); color: white; padding: 10px 14px; text-align: left; font-weight: 600; }
+th:first-child { border-radius: 8px 0 0 0; }
+th:last-child { border-radius: 0 8px 0 0; }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: var(--snow-light); }
+
+.flow-section { margin: 32px 0; }
+.flow-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+.flow-number {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+.flow-content h4 { font-size: 0.95rem; font-weight: 600; color: var(--snow-dark); margin-bottom: 4px; }
+.flow-content p { font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; }
+.flow-content code { font-size: 0.8em; }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Database Architecture</h1>
+    <p>How the local SQLite cache, Snowflake application database, and external source systems are connected in the Investment Governance platform.</p>
+</div>
+
+<div class="container">
+
+<div class="nav-bar">
+    <a href="DATA_SOURCES.html">Data Sources</a>
+    <a href="DATABASE_ARCHITECTURE.html" class="active">Database Architecture</a>
+    <a href="REQUEST_LIFECYCLE.html">Request Lifecycle</a>
+    <a href="APPROVAL_HIERARCHY.html">Approval Hierarchy</a>
+</div>
+
+<!-- ===== MAIN ARCHITECTURE DIAGRAM ===== -->
+<div class="diagram-canvas">
+    <div class="diagram-title">Investment Governance &mdash; Full Database Architecture</div>
+
+    <!-- Layer 1: Client Applications -->
+    <div class="layer">
+        <div class="layer-label layer-label-client">Client Applications</div>
+        <div class="boxes">
+            <div class="db-box box-client" style="flex:1; max-width:340px;">
+                <div class="box-title">macOS SwiftUI App</div>
+                <div class="box-subtitle">Investment Governance.app</div>
+                <div class="box-detail">Native macOS client &middot; Dashboard, Requests, Approvals</div>
+            </div>
+            <div class="db-box box-client" style="flex:1; max-width:340px;">
+                <div class="box-title">Streamlit Web App</div>
+                <div class="box-subtitle">streamlit_app.py</div>
+                <div class="box-detail">Browser-based client &middot; Identical functionality</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="connector">
+        <span class="arrow arrow-up-down">&#x25BC;</span>
+        <span class="connector-label">REST API calls (HTTP GET/POST/PUT/DELETE)</span>
+        <span class="arrow arrow-up-down">&#x25B2;</span>
+    </div>
+
+    <!-- Layer 2: API Server -->
+    <div class="layer">
+        <div class="layer-label layer-label-api">API Server</div>
+        <div class="boxes">
+            <div class="db-box box-api" style="flex:1; max-width:700px;">
+                <div class="box-title">Flask API Server <span style="font-weight:400; font-size:0.75rem; opacity:0.7;">(api_server.py)</span></div>
+                <div class="box-subtitle">http://127.0.0.1:8770/api</div>
+                <div class="box-detail">Shared backend for both clients &middot; Cache-first read/write pattern &middot; Background Snowflake sync</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="connector">
+        <span class="arrow arrow-up-down">&#x25BC;</span>
+        <span class="connector-label">Reads from cache &middot; Writes to cache first, then syncs</span>
+        <span class="arrow arrow-up-down">&#x25B2;</span>
+    </div>
+
+    <!-- Layer 3: Local SQLite Cache -->
+    <div class="layer">
+        <div class="layer-label layer-label-cache">Local Cache (SQLite)</div>
+        <div class="boxes">
+            <div class="db-box box-cache" style="flex:1; max-width:700px;">
+                <div class="box-title">cache.db <span class="badge-cache">SQLite</span></div>
+                <div class="box-subtitle">Local file &middot; Configurable via config/standard.json</div>
+                <div class="box-tables">
+                    <strong>6 tables:</strong> cached_investment_requests &middot; cached_approval_steps &middot;
+                    cached_current_user &middot; cached_accounts &middot; cached_final_approvers &middot;
+                    cache_metadata
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="connector">
+        <span class="arrow arrow-up-down">&#x25BC;</span>
+        <span class="connector-label">Startup: hydrate cache from Snowflake &nbsp;|&nbsp; Writes: sync back to Snowflake in background thread</span>
+        <span class="arrow arrow-up-down">&#x25B2;</span>
+    </div>
+
+    <!-- Layer 4: Snowflake Application DB (Read/Write) -->
+    <div class="layer">
+        <div class="layer-label layer-label-snowflake">Snowflake &mdash; Application Database <span class="badge-rw">READ / WRITE</span></div>
+        <div class="boxes">
+            <div class="db-box box-snowflake box-rw" style="flex:1; max-width:220px;">
+                <div class="box-title">INVESTMENT_REQUESTS</div>
+                <div class="box-subtitle">Core request data</div>
+                <div class="box-detail">57 columns &middot; Status, amounts, approval chain</div>
+            </div>
+            <div class="db-box box-snowflake box-rw" style="flex:1; max-width:180px;">
+                <div class="box-title">APPROVAL_STEPS</div>
+                <div class="box-subtitle">Workflow steps</div>
+                <div class="box-detail">Per-request approval history</div>
+            </div>
+            <div class="db-box box-snowflake box-rw" style="flex:1; max-width:180px;">
+                <div class="box-title">ANNUAL_BUDGETS</div>
+                <div class="box-subtitle">Budget allocations</div>
+                <div class="box-detail">By theater, quarter, industry</div>
+            </div>
+            <div class="db-box box-snowflake box-rw" style="flex:1; max-width:180px;">
+                <div class="box-title">FINAL_APPROVERS</div>
+                <div class="box-subtitle">Theater approvers</div>
+                <div class="box-detail">GVP-level final sign-off</div>
+            </div>
+        </div>
+        <div class="boxes" style="margin-top: 10px;">
+            <div class="db-box box-snowflake box-rw" style="flex:1; max-width:190px;">
+                <div class="box-title">REQUEST_OPPORTUNITIES</div>
+                <div class="box-subtitle">Linked SFDC opps</div>
+            </div>
+            <div class="db-box box-snowflake box-rw" style="flex:1; max-width:190px;">
+                <div class="box-title">REQUEST_CONTRIBUTORS</div>
+                <div class="box-subtitle">Collaborators</div>
+            </div>
+            <div class="db-box box-snowflake box-rw" style="flex:1; max-width:190px;">
+                <div class="box-title">SUGGESTED_CHANGES</div>
+                <div class="box-subtitle">Reviewer suggestions</div>
+            </div>
+        </div>
+        <div class="boxes" style="margin-top: 10px;">
+            <div class="db-box box-snowflake" style="flex:1; max-width:280px; border-style: dashed;">
+                <div class="box-title">VW_CURRENT_USER_INFO</div>
+                <div class="box-subtitle">View &middot; Joins USERS + Workday</div>
+                <div class="box-detail">WHERE SNOWFLAKE_USERNAME = CURRENT_USER()</div>
+            </div>
+            <div class="db-box box-snowflake" style="flex:1; max-width:280px; border-style: dashed;">
+                <div class="box-title">VW_DATA_SOURCE_TIMESTAMPS</div>
+                <div class="box-subtitle">View &middot; Cache freshness monitor</div>
+                <div class="box-detail">MAX timestamps across all tables</div>
+            </div>
+        </div>
+        <div style="text-align:center; margin-top:8px;">
+            <span style="font-size:0.68rem; color: rgba(255,255,255,0.4);">TEMP.INVESTMENT_GOVERNANCE &middot; Warehouse: SNOWHOUSE &middot; Connection: DemoAcct</span>
+        </div>
+    </div>
+
+    <div class="connector">
+        <span class="arrow arrow-up-down">&#x25B2;</span>
+        <span class="connector-label">Views & JOINs reference source databases (read-only)</span>
+        <span class="arrow arrow-up-down">&#x25B2;</span>
+    </div>
+
+    <!-- Layer 5: External Source Databases (Read-Only) -->
+    <div class="layer">
+        <div class="layer-label layer-label-source">Source Databases <span class="badge-ro">READ-ONLY</span></div>
+        <div class="boxes">
+            <div class="db-box box-source" style="flex:1; max-width:280px;">
+                <div class="box-title">HR.WORKDAY_BASIC</div>
+                <div class="box-subtitle">Workday HR System</div>
+                <div class="box-tables">
+                    <strong>SFDC_WORKDAY_USER_VW</strong><br>
+                    Employee ID, name, title, manager hierarchy, cost center, active status
+                </div>
+            </div>
+            <div class="db-box box-source" style="flex:1; max-width:280px;">
+                <div class="box-title">FIVETRAN.SALESFORCE</div>
+                <div class="box-subtitle">Salesforce via Fivetran Sync</div>
+                <div class="box-tables">
+                    <strong>ACCOUNT</strong> &mdash; Company/account records<br>
+                    <strong>OPPORTUNITY</strong> &mdash; Sales opportunity data
+                </div>
+            </div>
+            <div class="db-box box-source" style="flex:1; max-width:280px;">
+                <div class="box-title">SFDC_SHARED.SFDC_VIEWS</div>
+                <div class="box-subtitle">Snowflake Data Share</div>
+                <div class="box-tables">
+                    <strong>OPPORTUNITIES</strong><br>
+                    Shared SFDC opportunity view for cross-org access
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background: #10B981;"></div> Read/Write</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #F59E0B;"></div> Read-Only</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #F97316;"></div> Local Cache</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #29B5E8;"></div> Snowflake</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #8B5CF6;"></div> External Source</div>
+        <div class="legend-item" style="opacity:0.5;"><span style="font-size:0.85rem; margin-right:4px;">---</span> View (virtual)</div>
+    </div>
+</div>
+
+<!-- ===== DATA FLOW DETAILS ===== -->
+<h2>Data Flow Patterns</h2>
+
+<div class="two-col">
+    <div>
+        <h3>Read Path (cache-first)</h3>
+        <div class="flow-card">
+            <div class="flow-number" style="background:#DBEAFE; color:#1E40AF;">1</div>
+            <div class="flow-content">
+                <h4>Client sends GET request</h4>
+                <p>SwiftUI or Streamlit calls <code>GET /api/requests</code>, <code>/api/accounts</code>, etc.</p>
+            </div>
+        </div>
+        <div class="flow-card">
+            <div class="flow-number" style="background:#D1FAE5; color:#065F46;">2</div>
+            <div class="flow-content">
+                <h4>API reads from SQLite cache</h4>
+                <p>All GET endpoints read exclusively from local <code>cache.db</code>. Zero Snowflake round-trips for reads.</p>
+            </div>
+        </div>
+        <div class="flow-card">
+            <div class="flow-number" style="background:#E8F7FC; color:#11567F;">3</div>
+            <div class="flow-content">
+                <h4>Return JSON to client</h4>
+                <p>Sub-millisecond local SQLite response returned to the calling app.</p>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <h3>Write Path (cache-first + background sync)</h3>
+        <div class="flow-card">
+            <div class="flow-number" style="background:#DBEAFE; color:#1E40AF;">1</div>
+            <div class="flow-content">
+                <h4>Client sends POST/PUT/DELETE</h4>
+                <p>Create, update, submit, approve, reject, withdraw, revise, delete operations.</p>
+            </div>
+        </div>
+        <div class="flow-card">
+            <div class="flow-number" style="background:#FEF3C7; color:#92400E;">2</div>
+            <div class="flow-content">
+                <h4>Write to SQLite immediately</h4>
+                <p>API validates against cache, writes changes to <code>cache.db</code>, returns HTTP 200 to client instantly.</p>
+            </div>
+        </div>
+        <div class="flow-card">
+            <div class="flow-number" style="background:#D1FAE5; color:#065F46;">3</div>
+            <div class="flow-content">
+                <h4>Background sync to Snowflake</h4>
+                <p><code>sync_to_snowflake()</code> runs in a background thread. Writes to <code>TEMP.INVESTMENT_GOVERNANCE</code> using <code>SNOWHOUSE</code> warehouse.</p>
+            </div>
+        </div>
+        <div class="flow-card">
+            <div class="flow-number" style="background:#EDE9FE; color:#5B21B6;">4</div>
+            <div class="flow-content">
+                <h4>Re-hydrate cache from Snowflake</h4>
+                <p>After sync completes, cache is refreshed from Snowflake to pick up server-side changes (e.g., autoincrement IDs).</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h3 style="margin-top:32px;">Startup Hydration</h3>
+<div class="card">
+    <p class="section-intro" style="margin-bottom:0;">When the API server starts, it pulls all data from Snowflake into the local SQLite cache:</p>
+    <table>
+        <tr><th>Cache Table</th><th>Snowflake Source</th><th>Refresh Strategy</th></tr>
+        <tr><td><code>cached_investment_requests</code></td><td><code>TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS</code></td><td>Full replace on startup; re-hydrate after every write sync</td></tr>
+        <tr><td><code>cached_approval_steps</code></td><td><code>TEMP.INVESTMENT_GOVERNANCE.APPROVAL_STEPS</code></td><td>Full replace on startup; re-hydrate after every write sync</td></tr>
+        <tr><td><code>cached_current_user</code></td><td><code>TEMP.INVESTMENT_GOVERNANCE.VW_CURRENT_USER_INFO</code></td><td>Full refresh on startup</td></tr>
+        <tr><td><code>cached_accounts</code></td><td><code>FIVETRAN.SALESFORCE.ACCOUNT</code></td><td>Drop and recreate on every server start</td></tr>
+        <tr><td><code>cached_final_approvers</code></td><td><code>TEMP.INVESTMENT_GOVERNANCE.FINAL_APPROVERS</code></td><td>Full refresh on startup; read for approval routing lookups</td></tr>
+        <tr><td><code>cache_metadata</code></td><td><code>TEMP.INVESTMENT_GOVERNANCE.VW_DATA_SOURCE_TIMESTAMPS</code></td><td>Updated after each refresh cycle</td></tr>
+    </table>
+</div>
+
+<!-- ===== TABLE MAPPING ===== -->
+<h2>Cache-to-Snowflake Table Mapping</h2>
+<p class="section-intro">Each SQLite cache table mirrors or aggregates data from one or more Snowflake objects. The cache serves as a fast local replica for read operations.</p>
+
+<div class="diagram-canvas" style="padding: 28px 24px;">
+    <div class="diagram-title" style="font-size:0.95rem; margin-bottom:24px;">SQLite Cache &harr; Snowflake Mapping</div>
+    <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap: 0; align-items: start;">
+        <!-- Left: SQLite -->
+        <div>
+            <div class="layer-label layer-label-cache" style="margin-bottom:14px;">cache.db (SQLite)</div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <div class="db-box box-cache" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">cached_investment_requests</div></div>
+                <div class="db-box box-cache" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">cached_approval_steps</div></div>
+                <div class="db-box box-cache" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">cached_current_user</div></div>
+                <div class="db-box box-cache" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">cached_accounts</div></div>
+                <div class="db-box box-cache" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">cached_final_approvers</div></div>
+                <div class="db-box box-cache" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">cache_metadata</div></div>
+            </div>
+        </div>
+        <!-- Middle: Arrows -->
+        <div style="display:flex; flex-direction:column; align-items:center; padding: 38px 16px 0;">
+            <div style="color:rgba(255,255,255,0.4); font-size:0.8rem; padding:10px 0;">&#x2194;</div>
+            <div style="color:rgba(255,255,255,0.4); font-size:0.8rem; padding:10px 0;">&#x2194;</div>
+            <div style="color:rgba(255,255,255,0.4); font-size:0.8rem; padding:10px 0;">&#x2190;</div>
+            <div style="color:rgba(255,255,255,0.4); font-size:0.8rem; padding:10px 0;">&#x2190;</div>
+            <div style="color:rgba(255,255,255,0.4); font-size:0.8rem; padding:10px 0;">&#x2190;</div>
+            <div style="color:rgba(255,255,255,0.4); font-size:0.8rem; padding:10px 0;">&#x2190;</div>
+        </div>
+        <!-- Right: Snowflake -->
+        <div>
+            <div class="layer-label layer-label-snowflake" style="margin-bottom:14px;">Snowflake</div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <div class="db-box box-snowflake box-rw" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">INVESTMENT_REQUESTS</div><div class="box-subtitle">TEMP.INVESTMENT_GOVERNANCE</div></div>
+                <div class="db-box box-snowflake box-rw" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">APPROVAL_STEPS</div><div class="box-subtitle">TEMP.INVESTMENT_GOVERNANCE</div></div>
+                <div class="db-box box-snowflake" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">VW_CURRENT_USER_INFO</div><div class="box-subtitle">TEMP.INVESTMENT_GOVERNANCE</div></div>
+                <div class="db-box box-source" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">ACCOUNT</div><div class="box-subtitle">FIVETRAN.SALESFORCE</div></div>
+                <div class="db-box box-snowflake box-rw" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">FINAL_APPROVERS</div><div class="box-subtitle">TEMP.INVESTMENT_GOVERNANCE</div></div>
+                <div class="db-box box-snowflake" style="padding:8px 14px;"><div class="box-title" style="font-size:0.8rem;">VW_DATA_SOURCE_TIMESTAMPS</div><div class="box-subtitle">TEMP.INVESTMENT_GOVERNANCE</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== WHY SQLITE ===== -->
+<h2>Why SQLite?</h2>
+<div class="card">
+    <p class="section-intro" style="margin-bottom:16px;">The local SQLite cache exists to solve three problems:</p>
+    <div class="two-col">
+        <div class="flow-card" style="margin:0;">
+            <div class="flow-number" style="background:#D1FAE5; color:#065F46;">&#x26A1;</div>
+            <div class="flow-content">
+                <h4>Instant Response Times</h4>
+                <p>All read operations (request lists, account lookups, user info) serve from local disk instead of round-tripping to Snowflake. Sub-millisecond latency vs. 200-800ms per Snowflake query.</p>
+            </div>
+        </div>
+        <div class="flow-card" style="margin:0;">
+            <div class="flow-number" style="background:#FEF3C7; color:#92400E;">&#x1F504;</div>
+            <div class="flow-content">
+                <h4>Optimistic Writes</h4>
+                <p>Users see their changes immediately. The UI updates from the cache while Snowflake sync happens in the background. No spinners or "saving..." wait states.</p>
+            </div>
+        </div>
+        <div class="flow-card" style="margin:0;">
+            <div class="flow-number" style="background:#EDE9FE; color:#5B21B6;">&#x1F4B0;</div>
+            <div class="flow-content">
+                <h4>Reduced Warehouse Cost</h4>
+                <p>Reads never consume Snowflake compute credits. Only writes use the <code>SNOWHOUSE</code> warehouse, keeping costs proportional to actual data changes.</p>
+            </div>
+        </div>
+        <div class="flow-card" style="margin:0;">
+            <div class="flow-number" style="background:#DBEAFE; color:#1E40AF;">&#x1F310;</div>
+            <div class="flow-content">
+                <h4>Shared Backend</h4>
+                <p>Both the macOS SwiftUI app and the Streamlit web app hit the same Flask API server and the same cache. Changes made in either client are visible in both.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div>
+</body>
+</html>

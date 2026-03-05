@@ -243,8 +243,17 @@ struct SFDCAccount: Codable, Identifiable, Hashable {
     let theater: String?
     let industrySegment: String?
     let region: String?
+    let billingCountry: String?
+    let billingState: String?
+    let billingCity: String?
+    let isParent: Bool?
     
     var id: String { accountId }
+    
+    var billingLocation: String? {
+        let parts = [billingCity, billingState, billingCountry].compactMap { $0?.isEmpty == true ? nil : $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
     
     enum CodingKeys: String, CodingKey {
         case accountId = "ACCOUNT_ID"
@@ -252,6 +261,10 @@ struct SFDCAccount: Codable, Identifiable, Hashable {
         case theater = "THEATER"
         case industrySegment = "INDUSTRY_SEGMENT"
         case region = "REGION"
+        case billingCountry = "BILLING_COUNTRY"
+        case billingState = "BILLING_STATE"
+        case billingCity = "BILLING_CITY"
+        case isParent = "IS_PARENT"
     }
 }
 

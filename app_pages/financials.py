@@ -5,7 +5,6 @@ import os
 import db
 from helpers import (
     format_currency,
-    normalize_theater,
     get_current_fiscal_quarter,
     get_fiscal_year_quarters,
     get_portfolios_by_theater,
@@ -65,7 +64,7 @@ def run():
 
     budget_map = {}
     for b in budgets_for_fy:
-        theater = normalize_theater(b.get("theater") or "")
+        theater = b.get("theater") or ""
         industry = b.get("industry_segment") or b.get("portfolio") or ""
         key = (theater, industry)
         budget_map[key] = {
@@ -80,7 +79,7 @@ def run():
 
     approved_map = {}
     for r in fy_approved:
-        theater = normalize_theater(r.get("theater") or "")
+        theater = r.get("theater") or ""
         industry = r.get("industry_segment") or ""
         q = r.get("investment_quarter") or ""
         amt = float(r.get("requested_amount") or 0)

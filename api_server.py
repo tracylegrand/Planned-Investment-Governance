@@ -33,6 +33,32 @@ CACHE_DB_PATH = SCRIPT_DIR / CACHE_DB_NAME
 
 ADMIN_USERNAME = "TLEGRAND"
 
+THEATER_DISPLAY_NAMES = {
+    "USMajors": "US Majors",
+    "USPubSec": "US Public Sector",
+    "AMSExpansion": "Americas Enterprise",
+    "AMSPartner": "Americas Enterprise",
+    "AMSAcquisition": "Americas Acquisition",
+    "AMSEnt": "Americas Enterprise",
+    "EMEA": "EMEA",
+    "APJ": "APJ",
+    "APAC": "APJ",
+}
+
+REGION_TO_PORTFOLIO = {
+    "CME": "TMT",
+    "TMT": "TMT",
+    "RetailCG": "RCG",
+}
+
+DISPLAY_TO_RAW_THEATERS = {}
+for _raw, _display in THEATER_DISPLAY_NAMES.items():
+    DISPLAY_TO_RAW_THEATERS.setdefault(_display, set()).add(_raw)
+
+PORTFOLIO_TO_RAW_REGIONS = {}
+for _raw, _port in REGION_TO_PORTFOLIO.items():
+    PORTFOLIO_TO_RAW_REGIONS.setdefault(_port, set()).add(_raw)
+
 cache_lock = threading.Lock()
 progress_lock = threading.Lock()
 impersonation_lock = threading.Lock()
@@ -79,25 +105,13 @@ def init_cache_db():
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS cached_users (
-            user_id INTEGER PRIMARY KEY,
-            snowflake_username TEXT UNIQUE,
-            employee_id INTEGER,
-            display_name TEXT,
-            title TEXT,
-            role TEXT,
-            theater TEXT,
-            industry_segment TEXT,
-            manager_id INTEGER,
-            manager_name TEXT,
-            approval_level INTEGER,
-            is_final_approver INTEGER
-        )
-    """)
+    cur.execute("DROP TABLE IF EXISTS cached_users")
+    cur.execute("DROP TABLE IF EXISTS cached_opportunities")
+    cur.execute("DROP TABLE IF EXISTS pending_sync")
 
+    cur.execute("DROP TABLE IF EXISTS cached_current_user")
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS cached_current_user (
+        CREATE TABLE cached_current_user (
             snowflake_username TEXT PRIMARY KEY,
             user_id INTEGER,
             employee_id INTEGER,
@@ -113,8 +127,9 @@ def init_cache_db():
         )
     """)
 
+    cur.execute("DROP TABLE IF EXISTS cached_investment_requests")
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS cached_investment_requests (
+        CREATE TABLE cached_investment_requests (
             request_id INTEGER PRIMARY KEY,
             request_title TEXT,
             account_id TEXT,
@@ -136,22 +151,6 @@ def init_cache_db():
             next_approver_id INTEGER,
             next_approver_name TEXT,
             next_approver_title TEXT,
-            dm_approved_by TEXT,
-            dm_approved_by_title TEXT,
-            dm_approved_at TEXT,
-            dm_comments TEXT,
-            rd_approved_by TEXT,
-            rd_approved_by_title TEXT,
-            rd_approved_at TEXT,
-            rd_comments TEXT,
-            avp_approved_by TEXT,
-            avp_approved_by_title TEXT,
-            avp_approved_at TEXT,
-            avp_comments TEXT,
-            gvp_approved_by TEXT,
-            gvp_approved_by_title TEXT,
-            gvp_approved_at TEXT,
-            gvp_comments TEXT,
             updated_at TEXT,
             withdrawn_by TEXT,
             withdrawn_by_name TEXT,
@@ -172,42 +171,22 @@ def init_cache_db():
 
     cur.execute("DROP TABLE IF EXISTS cached_accounts")
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS cached_accounts (
+        CREATE TABLE cached_accounts (
             account_id TEXT,
             account_name TEXT PRIMARY KEY,
             theater TEXT,
             industry_segment TEXT,
-            region TEXT
+            region TEXT,
+            billing_country TEXT,
+            billing_state TEXT,
+            billing_city TEXT,
+            parent_id TEXT
         )
     """)
 
+    cur.execute("DROP TABLE IF EXISTS cached_approval_steps")
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS cached_opportunities (
-            opportunity_id TEXT PRIMARY KEY,
-            opportunity_name TEXT,
-            account_id TEXT,
-            account_name TEXT,
-            stage TEXT,
-            amount REAL,
-            close_date TEXT,
-            owner_name TEXT
-        )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pending_sync (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operation TEXT,
-            table_name TEXT,
-            data TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'pending',
-            error_message TEXT
-        )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS cached_approval_steps (
+        CREATE TABLE cached_approval_steps (
             step_id INTEGER PRIMARY KEY,
             request_id INTEGER NOT NULL,
             step_order INTEGER NOT NULL,
@@ -222,8 +201,9 @@ def init_cache_db():
         )
     """)
 
+    cur.execute("DROP TABLE IF EXISTS cached_final_approvers")
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS cached_final_approvers (
+        CREATE TABLE cached_final_approvers (
             theater TEXT PRIMARY KEY,
             approver_employee_id INTEGER NOT NULL,
             approver_name TEXT NOT NULL,
@@ -375,9 +355,7 @@ def _refresh_requests_and_steps():
                    REQUESTED_AMOUNT, INVESTMENT_QUARTER, BUSINESS_JUSTIFICATION, EXPECTED_OUTCOME,
                    RISK_ASSESSMENT, CREATED_BY, CREATED_BY_NAME, CREATED_BY_EMPLOYEE_ID, CREATED_AT,
                    THEATER, INDUSTRY_SEGMENT, STATUS, CURRENT_APPROVAL_LEVEL, NEXT_APPROVER_ID,
-                   NEXT_APPROVER_NAME, NEXT_APPROVER_TITLE, DM_APPROVED_BY, DM_APPROVED_BY_TITLE, DM_APPROVED_AT, DM_COMMENTS,
-                   RD_APPROVED_BY, RD_APPROVED_BY_TITLE, RD_APPROVED_AT, RD_COMMENTS, AVP_APPROVED_BY, AVP_APPROVED_BY_TITLE,
-                   AVP_APPROVED_AT, AVP_COMMENTS, GVP_APPROVED_BY, GVP_APPROVED_BY_TITLE, GVP_APPROVED_AT, GVP_COMMENTS, UPDATED_AT,
+                   NEXT_APPROVER_NAME, NEXT_APPROVER_TITLE, UPDATED_AT,
                    WITHDRAWN_BY, WITHDRAWN_BY_NAME, WITHDRAWN_AT, WITHDRAWN_COMMENT,
                    SUBMITTED_COMMENT, SUBMITTED_BY_NAME, SUBMITTED_AT,
                    DRAFT_COMMENT, DRAFT_BY_NAME, DRAFT_AT,
@@ -395,12 +373,30 @@ def _refresh_requests_and_steps():
             )
 
         cache_cur = cache_conn.cursor()
-        cache_cur.execute("DELETE FROM cached_investment_requests")
-        placeholders = ", ".join(["?"] * 52)
+        cache_cur.execute("SELECT request_id FROM cached_investment_requests WHERE request_id < 0")
+        local_temp_ids = [r[0] for r in cache_cur.fetchall()]
+        if local_temp_ids:
+            id_placeholders = ", ".join(["?"] * len(local_temp_ids))
+            cache_cur.execute(f"DELETE FROM cached_investment_requests WHERE request_id >= 0 OR request_id NOT IN ({id_placeholders})", local_temp_ids)
+        else:
+            cache_cur.execute("DELETE FROM cached_investment_requests")
+        placeholders = ", ".join(["?"] * 36)
         cache_cur.executemany(
             f"INSERT OR REPLACE INTO cached_investment_requests VALUES ({placeholders})",
             [convert_row(row) for row in rows]
         )
+        if local_temp_ids:
+            sf_titles = {r[1] for r in rows}
+            for temp_id in local_temp_ids:
+                cache_cur.execute("SELECT request_title, created_by FROM cached_investment_requests WHERE request_id = ?", (temp_id,))
+                temp_row = cache_cur.fetchone()
+                if temp_row:
+                    cache_cur.execute(
+                        "SELECT 1 FROM cached_investment_requests WHERE request_title = ? AND created_by = ? AND request_id > 0 LIMIT 1",
+                        (temp_row[0], temp_row[1])
+                    )
+                    if cache_cur.fetchone():
+                        cache_cur.execute("DELETE FROM cached_investment_requests WHERE request_id = ?", (temp_id,))
 
         sf_cur.execute("""
             SELECT STEP_ID, REQUEST_ID, STEP_ORDER, APPROVER_EMPLOYEE_ID, APPROVER_NAME,
@@ -479,14 +475,26 @@ def update_progress(step_name, steps_completed, message="", total_steps=7):
         cache_progress["message"] = message
 
 def resolve_approval_chain(employee_id, theater):
+    final_approver_eid = None
+    cache_conn = get_cache_connection()
+    try:
+        cc = cache_conn.cursor()
+        cc.execute("SELECT approver_employee_id FROM cached_final_approvers WHERE theater = ?", (theater,))
+        ca_row = cc.fetchone()
+        if ca_row:
+            final_approver_eid = int(ca_row[0])
+    finally:
+        cache_conn.close()
+
     sf_conn = get_snowflake_connection()
     try:
         cur = sf_conn.cursor()
-        cur.execute("SELECT APPROVER_EMPLOYEE_ID FROM TEMP.INVESTMENT_GOVERNANCE.FINAL_APPROVERS WHERE THEATER = %s", (theater,))
-        fa_row = cur.fetchone()
-        if not fa_row:
-            return []
-        final_approver_eid = int(fa_row[0])
+        if final_approver_eid is None:
+            cur.execute("SELECT APPROVER_EMPLOYEE_ID FROM TEMP.INVESTMENT_GOVERNANCE.FINAL_APPROVERS WHERE THEATER = %s", (theater,))
+            fa_row = cur.fetchone()
+            if not fa_row:
+                return []
+            final_approver_eid = int(fa_row[0])
 
         cur.execute("""
             WITH RECURSIVE chain AS (
@@ -649,9 +657,7 @@ def full_cache_refresh():
                                REQUESTED_AMOUNT, INVESTMENT_QUARTER, BUSINESS_JUSTIFICATION, EXPECTED_OUTCOME,
                                RISK_ASSESSMENT, CREATED_BY, CREATED_BY_NAME, CREATED_BY_EMPLOYEE_ID, CREATED_AT,
                                THEATER, INDUSTRY_SEGMENT, STATUS, CURRENT_APPROVAL_LEVEL, NEXT_APPROVER_ID,
-                               NEXT_APPROVER_NAME, NEXT_APPROVER_TITLE, DM_APPROVED_BY, DM_APPROVED_BY_TITLE, DM_APPROVED_AT, DM_COMMENTS,
-                               RD_APPROVED_BY, RD_APPROVED_BY_TITLE, RD_APPROVED_AT, RD_COMMENTS, AVP_APPROVED_BY, AVP_APPROVED_BY_TITLE,
-                               AVP_APPROVED_AT, AVP_COMMENTS, GVP_APPROVED_BY, GVP_APPROVED_BY_TITLE, GVP_APPROVED_AT, GVP_COMMENTS, UPDATED_AT,
+                               NEXT_APPROVER_NAME, NEXT_APPROVER_TITLE, UPDATED_AT,
                                WITHDRAWN_BY, WITHDRAWN_BY_NAME, WITHDRAWN_AT, WITHDRAWN_COMMENT,
                                SUBMITTED_COMMENT, SUBMITTED_BY_NAME, SUBMITTED_AT,
                                DRAFT_COMMENT, DRAFT_BY_NAME, DRAFT_AT,
@@ -670,7 +676,7 @@ def full_cache_refresh():
 
                     update_progress("requests_cache", 4, f"Caching {len(request_rows)} investment requests...")
                     cache_cur.execute("DELETE FROM cached_investment_requests")
-                    placeholders = ", ".join(["?"] * 52)
+                    placeholders = ", ".join(["?"] * 36)
                     cache_cur.executemany(
                         f"INSERT OR REPLACE INTO cached_investment_requests VALUES ({placeholders})",
                         [convert_row(row) for row in request_rows]
@@ -696,18 +702,22 @@ def full_cache_refresh():
 
                     update_progress("accounts", 6, "Building account lookup cache...")
                     sf_cur.execute("""
-                        SELECT ID AS ACCOUNT_ID, NAME AS ACCOUNT_NAME,
-                               ACCOUNT_OWNER_GEO_C AS THEATER, INDUSTRY_C AS INDUSTRY_SEGMENT,
-                               ACCOUNT_OWNER_REGION_C AS REGION
-                        FROM FIVETRAN.SALESFORCE.ACCOUNT
-                        WHERE NAME IS NOT NULL AND _FIVETRAN_DELETED = FALSE
-                        GROUP BY ID, NAME, ACCOUNT_OWNER_GEO_C, INDUSTRY_C, ACCOUNT_OWNER_REGION_C
-                        ORDER BY NAME
+                        SELECT a.ID AS ACCOUNT_ID, a.NAME AS ACCOUNT_NAME,
+                               COALESCE(NULLIF(a.ACCOUNT_OWNER_GEO_C, ''), p.ACCOUNT_OWNER_GEO_C) AS THEATER,
+                               a.INDUSTRY_C AS INDUSTRY_SEGMENT,
+                               COALESCE(NULLIF(a.ACCOUNT_OWNER_REGION_C, ''), p.ACCOUNT_OWNER_REGION_C) AS REGION,
+                               a.BILLING_COUNTRY, a.BILLING_STATE, a.BILLING_CITY,
+                               a.PARENT_ID
+                        FROM FIVETRAN.SALESFORCE.ACCOUNT a
+                        LEFT JOIN FIVETRAN.SALESFORCE.ACCOUNT p ON a.PARENT_ID = p.ID
+                        WHERE a.NAME IS NOT NULL AND a._FIVETRAN_DELETED = FALSE
+                        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
+                        ORDER BY a.NAME
                     """)
                     acct_rows = sf_cur.fetchall()
                     cache_cur.execute("DELETE FROM cached_accounts")
                     cache_cur.executemany(
-                        "INSERT OR IGNORE INTO cached_accounts VALUES (?, ?, ?, ?, ?)",
+                        "INSERT OR IGNORE INTO cached_accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         acct_rows
                     )
                     cache_conn.commit()
@@ -760,7 +770,7 @@ def startup_cache_check():
         print("Cache is fresh, no refresh needed")
 
 def _request_row_to_dict(row):
-    return {
+    d = {
         "REQUEST_ID": row["request_id"],
         "REQUEST_TITLE": row["request_title"],
         "ACCOUNT_ID": row["account_id"],
@@ -775,29 +785,17 @@ def _request_row_to_dict(row):
         "CREATED_BY_NAME": row["created_by_name"],
         "CREATED_BY_EMPLOYEE_ID": row["created_by_employee_id"],
         "CREATED_AT": row["created_at"],
-        "THEATER": row["theater"],
-        "INDUSTRY_SEGMENT": row["industry_segment"],
+        "THEATER": THEATER_DISPLAY_NAMES.get(row["theater"], row["theater"]) if row["theater"] else row["theater"],
+        "INDUSTRY_SEGMENT": REGION_TO_PORTFOLIO.get(row["industry_segment"], row["industry_segment"]) if row["industry_segment"] else row["industry_segment"],
         "STATUS": row["status"],
         "CURRENT_APPROVAL_LEVEL": row["current_approval_level"],
         "NEXT_APPROVER_ID": row["next_approver_id"],
         "NEXT_APPROVER_NAME": row["next_approver_name"],
         "NEXT_APPROVER_TITLE": row["next_approver_title"],
-        "DM_APPROVED_BY": row["dm_approved_by"],
-        "DM_APPROVED_BY_TITLE": row["dm_approved_by_title"],
-        "DM_APPROVED_AT": row["dm_approved_at"],
-        "DM_COMMENTS": row["dm_comments"],
-        "RD_APPROVED_BY": row["rd_approved_by"],
-        "RD_APPROVED_BY_TITLE": row["rd_approved_by_title"],
-        "RD_APPROVED_AT": row["rd_approved_at"],
-        "RD_COMMENTS": row["rd_comments"],
-        "AVP_APPROVED_BY": row["avp_approved_by"],
-        "AVP_APPROVED_BY_TITLE": row["avp_approved_by_title"],
-        "AVP_APPROVED_AT": row["avp_approved_at"],
-        "AVP_COMMENTS": row["avp_comments"],
-        "GVP_APPROVED_BY": row["gvp_approved_by"],
-        "GVP_APPROVED_BY_TITLE": row["gvp_approved_by_title"],
-        "GVP_APPROVED_AT": row["gvp_approved_at"],
-        "GVP_COMMENTS": row["gvp_comments"],
+        "DM_APPROVED_BY": None, "DM_APPROVED_BY_TITLE": None, "DM_APPROVED_AT": None, "DM_COMMENTS": None,
+        "RD_APPROVED_BY": None, "RD_APPROVED_BY_TITLE": None, "RD_APPROVED_AT": None, "RD_COMMENTS": None,
+        "AVP_APPROVED_BY": None, "AVP_APPROVED_BY_TITLE": None, "AVP_APPROVED_AT": None, "AVP_COMMENTS": None,
+        "GVP_APPROVED_BY": None, "GVP_APPROVED_BY_TITLE": None, "GVP_APPROVED_AT": None, "GVP_COMMENTS": None,
         "UPDATED_AT": row["updated_at"],
         "WITHDRAWN_BY": row["withdrawn_by"],
         "WITHDRAWN_BY_NAME": row["withdrawn_by_name"],
@@ -814,6 +812,22 @@ def _request_row_to_dict(row):
         "SFDC_OPPORTUNITY_LINK": row["sfdc_opportunity_link"],
         "EXPECTED_ROI": row["expected_roi"],
     }
+
+    step_prefix_map = {1: "DM", 2: "RD", 3: "AVP", 4: "GVP"}
+    try:
+        steps = get_cached_approval_steps(row["request_id"])
+        for step in steps:
+            if step["STATUS"] == "APPROVED":
+                prefix = step_prefix_map.get(step["STEP_ORDER"])
+                if prefix:
+                    d[f"{prefix}_APPROVED_BY"] = step["APPROVER_NAME"]
+                    d[f"{prefix}_APPROVED_BY_TITLE"] = step["APPROVER_TITLE"]
+                    d[f"{prefix}_APPROVED_AT"] = step["APPROVED_AT"]
+                    d[f"{prefix}_COMMENTS"] = step["COMMENTS"]
+    except Exception:
+        pass
+
+    return d
 
 @app.route('/api/health')
 def health():
@@ -1151,11 +1165,25 @@ def get_requests():
         params = []
 
         if theater:
-            query += " AND theater = ?"
-            params.append(theater)
+            raw_theaters = DISPLAY_TO_RAW_THEATERS.get(theater, set())
+            if raw_theaters:
+                placeholders = ",".join("?" * (len(raw_theaters) + 1))
+                query += f" AND theater IN ({placeholders})"
+                params.append(theater)
+                params.extend(raw_theaters)
+            else:
+                query += " AND theater = ?"
+                params.append(theater)
         if industry_segment:
-            query += " AND industry_segment = ?"
-            params.append(industry_segment)
+            raw_regions = PORTFOLIO_TO_RAW_REGIONS.get(industry_segment, set())
+            if raw_regions:
+                placeholders = ",".join("?" * (len(raw_regions) + 1))
+                query += f" AND industry_segment IN ({placeholders})"
+                params.append(industry_segment)
+                params.extend(raw_regions)
+            else:
+                query += " AND industry_segment = ?"
+                params.append(industry_segment)
         if quarter:
             query += " AND investment_quarter = ?"
             params.append(quarter)
@@ -1623,10 +1651,6 @@ def withdraw_request(request_id):
         "status": "DRAFT",
         "current_approval_level": 0,
         "next_approver_name": None, "next_approver_title": None, "next_approver_id": None,
-        "dm_approved_by": None, "dm_approved_by_title": None, "dm_approved_at": None, "dm_comments": None,
-        "rd_approved_by": None, "rd_approved_by_title": None, "rd_approved_at": None, "rd_comments": None,
-        "avp_approved_by": None, "avp_approved_by_title": None, "avp_approved_at": None, "avp_comments": None,
-        "gvp_approved_by": None, "gvp_approved_by_title": None, "gvp_approved_at": None, "gvp_comments": None,
         "withdrawn_by": current_user, "withdrawn_by_name": withdrawn_by_name,
         "withdrawn_at": now_iso, "withdrawn_comment": comment,
         "updated_at": now_iso
@@ -1765,15 +1789,6 @@ def approve_request(request_id):
             next_title = next_step["APPROVER_TITLE"] if next_step else None
             next_eid = next_step["APPROVER_EMPLOYEE_ID"] if next_step else None
 
-        legacy_col_map = {1: "dm", 2: "rd", 3: "avp", 4: "gvp"}
-        legacy_prefix = legacy_col_map.get(step_order)
-        legacy_updates = {}
-        if legacy_prefix:
-            legacy_updates[f"{legacy_prefix}_approved_by"] = approver_name
-            legacy_updates[f"{legacy_prefix}_approved_by_title"] = approver_title
-            legacy_updates[f"{legacy_prefix}_approved_at"] = now_iso
-            legacy_updates[f"{legacy_prefix}_comments"] = comments
-
         cache_update = {
             "status": new_status,
             "current_approval_level": step_order + 1 if not is_final else step_order,
@@ -1781,7 +1796,6 @@ def approve_request(request_id):
             "next_approver_title": next_title,
             "next_approver_id": next_eid,
             "updated_at": now_iso,
-            **legacy_updates
         }
         update_cache_request(request_id, cache_update)
 
@@ -1791,6 +1805,7 @@ def approve_request(request_id):
         sf_next_name = next_name
         sf_next_title = next_title
         sf_next_eid = next_eid
+        legacy_col_map = {1: "dm", 2: "rd", 3: "avp", 4: "gvp"}
 
         def _sync():
             sf_conn = get_snowflake_connection(dml=True)
@@ -1833,24 +1848,20 @@ def approve_request(request_id):
 
     else:
         status_transitions = {
-            'SUBMITTED': ('DM_APPROVED', 'dm_approved_by', 'dm_approved_by_title', 'dm_approved_at', 'dm_comments', 2),
-            'DM_APPROVED': ('RD_APPROVED', 'rd_approved_by', 'rd_approved_by_title', 'rd_approved_at', 'rd_comments', 3),
-            'RD_APPROVED': ('AVP_APPROVED', 'avp_approved_by', 'avp_approved_by_title', 'avp_approved_at', 'avp_comments', 4),
-            'AVP_APPROVED': ('FINAL_APPROVED', 'gvp_approved_by', 'gvp_approved_by_title', 'gvp_approved_at', 'gvp_comments', 5)
+            'SUBMITTED': ('DM_APPROVED', 2),
+            'DM_APPROVED': ('RD_APPROVED', 3),
+            'RD_APPROVED': ('AVP_APPROVED', 4),
+            'AVP_APPROVED': ('FINAL_APPROVED', 5)
         }
 
         if current_status not in status_transitions:
             return jsonify({"error": "Request cannot be approved in current status"}), 400
 
-        new_status, approver_col, title_col, time_col, comments_col, new_level = status_transitions[current_status]
+        new_status, new_level = status_transitions[current_status]
         now_iso = datetime.now().isoformat()
 
         update_cache_request(request_id, {
             "status": new_status,
-            approver_col: approver_name,
-            title_col: approver_title,
-            time_col: now_iso,
-            comments_col: comments,
             "current_approval_level": new_level,
             "updated_at": now_iso
         })
@@ -1902,7 +1913,6 @@ def reject_request(request_id):
 
     update_cache_request(request_id, {
         "status": "REJECTED",
-        "gvp_comments": comments,
         "updated_at": now_iso
     })
 
@@ -2086,7 +2096,6 @@ def send_back_for_revision(request_id):
         "status": "DRAFT",
         "current_approval_level": 0,
         "next_approver_name": None, "next_approver_title": None, "next_approver_id": None,
-        "gvp_comments": comments,
         "updated_at": now_iso
     })
 
@@ -2139,7 +2148,6 @@ def deny_request(request_id):
 
     update_cache_request(request_id, {
         "status": "DENIED",
-        "gvp_comments": comments,
         "updated_at": now_iso
     })
 
@@ -2178,10 +2186,11 @@ def search_accounts():
         total = cur.fetchone()[0]
 
         cur.execute("""
-            SELECT account_id, account_name, theater, industry_segment, region
+            SELECT account_id, account_name, theater, industry_segment, region,
+                   billing_country, billing_state, billing_city, parent_id
             FROM cached_accounts
             WHERE UPPER(account_name) LIKE UPPER(?)
-            ORDER BY account_name
+            ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, account_name
             LIMIT 20
         """, (f'%{query}%',))
         rows = cur.fetchall()
@@ -2192,7 +2201,11 @@ def search_accounts():
                 "ACCOUNT_NAME": row[1],
                 "THEATER": row[2],
                 "INDUSTRY_SEGMENT": row[3],
-                "REGION": row[4]
+                "REGION": row[4],
+                "BILLING_COUNTRY": row[5],
+                "BILLING_STATE": row[6],
+                "BILLING_CITY": row[7],
+                "IS_PARENT": row[8] is None
             } for row in rows],
             "total_matches": total
         })
@@ -2201,24 +2214,6 @@ def search_accounts():
         return jsonify([])
     finally:
         cache_conn.close()
-
-THEATER_DISPLAY_NAMES = {
-    "USMajors": "US Majors",
-    "USPubSec": "US Public Sector",
-    "AMSExpansion": "Americas Enterprise",
-    "AMSPartner": "Americas Enterprise",
-    "AMSAcquisition": "Americas Acquisition",
-    "AMSEnt": "Americas Enterprise",
-    "EMEA": "EMEA",
-    "APJ": "APJ",
-    "APAC": "APJ",
-}
-
-REGION_TO_PORTFOLIO = {
-    "CME": "CME (TMT)",
-    "TMT": "CME (TMT)",
-    "RetailCG": "RCG",
-}
 
 @app.route('/api/lookup/theaters-industries')
 def get_theaters_industries():

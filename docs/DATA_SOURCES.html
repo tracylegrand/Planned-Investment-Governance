@@ -198,7 +198,7 @@ code { background: #F1F5F9; padding: 2px 6px; border-radius: 4px; font-size: 0.8
     <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:14px;">Core table storing all investment requests with status tracking, full approval chain fields, business case content, and audit metadata.</p>
     <div class="tag-row">
         <span class="badge badge-blue">PK: REQUEST_ID (autoincrement)</span>
-        <span class="badge badge-green">57 columns</span>
+        <span class="badge badge-green">41 columns (Snowflake) / 36 columns (cache)</span>
         <span class="badge badge-gray">Default STATUS = 'DRAFT'</span>
     </div>
     <div class="columns-group">
@@ -229,10 +229,9 @@ code { background: #F1F5F9; padding: 2px 6px; border-radius: 4px; font-size: 0.8
         <div class="col-card">
             <h4>Approval Chain</h4>
             <ul>
-                <li><code>DM_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
-                <li><code>RD_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
-                <li><code>AVP_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
-                <li><code>GVP_APPROVED_BY/TITLE/AT/COMMENTS</code></li>
+                <li>Stored in <code>APPROVAL_STEPS</code> table</li>
+                <li>Legacy per-level columns remain in Snowflake</li>
+                <li>Cache reads approval history from steps</li>
             </ul>
         </div>
     </div>
@@ -450,12 +449,12 @@ code { background: #F1F5F9; padding: 2px 6px; border-radius: 4px; font-size: 0.8
 
     <table>
         <tr><th>Cache Table</th><th>Source</th><th>Refresh Trigger</th></tr>
-        <tr><td><code>cached_users</code></td><td>USERS</td><td>Full refresh on startup or timestamp mismatch</td></tr>
-        <tr><td><code>cached_current_user</code></td><td>VW_CURRENT_USER_INFO</td><td>Full refresh on startup</td></tr>
-        <tr><td><code>cached_investment_requests</code></td><td>INVESTMENT_REQUESTS</td><td>Full refresh on startup; background refresh after every write</td></tr>
-        <tr><td><code>cached_accounts</code></td><td>SFDC_ACCOUNTS</td><td>Dropped and recreated on every server start</td></tr>
-        <tr><td><code>cached_opportunities</code></td><td>&mdash;</td><td>Reserved for future use</td></tr>
         <tr><td><code>cache_metadata</code></td><td>Snowflake timestamps</td><td>Updated after each refresh</td></tr>
+        <tr><td><code>cached_current_user</code></td><td>VW_CURRENT_USER_INFO</td><td>Full refresh on startup</td></tr>
+        <tr><td><code>cached_investment_requests</code></td><td>INVESTMENT_REQUESTS (36 columns)</td><td>Full refresh on startup; background refresh after every write</td></tr>
+        <tr><td><code>cached_approval_steps</code></td><td>APPROVAL_STEPS</td><td>Full refresh on startup; background refresh after every write</td></tr>
+        <tr><td><code>cached_accounts</code></td><td>FIVETRAN.SALESFORCE.ACCOUNT</td><td>Dropped and recreated on every server start</td></tr>
+        <tr><td><code>cached_final_approvers</code></td><td>FINAL_APPROVERS</td><td>Full refresh on startup; read from cache during approval chain resolution</td></tr>
     </table>
 
     <h3 style="margin-top:20px;">Cache Architecture</h3>

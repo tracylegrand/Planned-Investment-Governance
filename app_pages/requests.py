@@ -3,7 +3,6 @@ import pandas as pd
 import db
 from helpers import (
     format_currency,
-    normalize_theater,
     STATUS_DISPLAY,
     STATUS_COLORS,
     IN_REVIEW_STATUSES,
@@ -67,18 +66,19 @@ def run():
             "id": r.get("request_id"),
             "Company": r.get("account_name", ""),
             "Investment Request": r.get("request_title", ""),
-            "Theater": normalize_theater(r.get("theater", "")),
+            "Theater": r.get("theater", ""),
             "Industry": abbreviate_industry(r.get("industry_segment", "")),
             "Quarter": r.get("investment_quarter", ""),
             "Amount": float(r.get("requested_amount") or 0),
             "Status": STATUS_DISPLAY.get(r.get("status", ""), r.get("status", "")),
+            "Requester": r.get("created_by_name", ""),
             "Next Approver": r.get("next_approver_name", ""),
         })
 
     df = pd.DataFrame(rows)
 
     event = st.dataframe(
-        df[["Company", "Investment Request", "Theater", "Industry", "Quarter", "Amount", "Status", "Next Approver"]],
+        df[["Company", "Investment Request", "Theater", "Industry", "Quarter", "Amount", "Requester", "Next Approver", "Status"]],
         column_config={
             "Amount": st.column_config.NumberColumn(format="$%,.0f"),
         },

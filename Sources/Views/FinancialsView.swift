@@ -78,11 +78,11 @@ struct FinancialsView: View {
 
         var theaterIndustries: [String: Set<String>] = [:]
         for b in budgetsForYear {
-            let t = TheaterMapping.normalizeTheater(b.theater)
+            let t = b.theater
             theaterIndustries[t, default: []].insert(b.industrySegment)
         }
         for r in fyApproved {
-            let t = TheaterMapping.normalizeTheater(r.theater ?? "")
+            let t = r.theater ?? ""
             if !t.isEmpty {
                 let ind = r.industrySegment ?? ""
                 theaterIndustries[t, default: []].insert(ind)
@@ -102,8 +102,7 @@ struct FinancialsView: View {
 
         var rows: [FinancialRow] = []
         for theater in allTheaters {
-            let dbCodes = TheaterMapping.dbCodes(forDisplayName: theater)
-            let theaterBudgets = budgetsForYear.filter { TheaterMapping.normalizeTheater($0.theater) == theater }
+            let theaterBudgets = budgetsForYear.filter { $0.theater == theater }
             var allIndustries = (theaterIndustries[theater] ?? []).sorted()
             if !selectedIndustries.isEmpty {
                 allIndustries = allIndustries.filter { selectedIndustries.contains($0) }
@@ -122,7 +121,7 @@ struct FinancialsView: View {
                 let q4b = budgets.map { $0.q4Budget }.reduce(0, +)
 
                 let indRequests: [InvestmentRequest]
-                indRequests = approvedRequests.filter { dbCodes.contains($0.theater ?? "") && $0.industrySegment == industry }
+                indRequests = approvedRequests.filter { $0.theater == theater && $0.industrySegment == industry }
                 let q1a = indRequests.filter { $0.investmentQuarter == "\(fy)-Q1" }.compactMap { $0.requestedAmount }.reduce(0, +)
                 let q2a = indRequests.filter { $0.investmentQuarter == "\(fy)-Q2" }.compactMap { $0.requestedAmount }.reduce(0, +)
                 let q3a = indRequests.filter { $0.investmentQuarter == "\(fy)-Q3" }.compactMap { $0.requestedAmount }.reduce(0, +)

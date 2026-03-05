@@ -146,7 +146,8 @@ def deny_request(request_id, comments=""):
 
 
 def search_accounts(q):
-    return _get("/api/accounts/search", params={"q": q})
+    data = _get("/api/accounts/search", params={"q": q})
+    return data.get("accounts", []), data.get("total_matches", 0)
 
 
 def get_account_opportunities(account_id):

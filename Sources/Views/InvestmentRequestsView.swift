@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SortColumn: String {
-    case company, request, theater, industry, quarter, amount, status, nextApprover
+    case company, request, theater, industry, quarter, amount, status, requester, nextApprover
 }
 
 struct InvestmentRequestsView: View {
@@ -101,9 +101,11 @@ struct InvestmentRequestsView: View {
         let filtered = dataService.investmentRequests.filter { request in
             let matchesSearch = searchText.isEmpty ||
                 request.requestTitle.localizedCaseInsensitiveContains(searchText) ||
-                (request.accountName?.localizedCaseInsensitiveContains(searchText) ?? false)
+                (request.accountName?.localizedCaseInsensitiveContains(searchText) ?? false) ||
+                (request.createdByName?.localizedCaseInsensitiveContains(searchText) ?? false) ||
+                (request.nextApproverName?.localizedCaseInsensitiveContains(searchText) ?? false)
             
-            let matchesTheater = selectedTheater == "All" || TheaterMapping.dbCodes(forDisplayName: selectedTheater).contains(request.theater ?? "")
+            let matchesTheater = selectedTheater == "All" || request.theater == selectedTheater
             let matchesIndustry: Bool
             if selectedIndustries.isEmpty {
                 matchesIndustry = true
@@ -165,6 +167,8 @@ struct InvestmentRequestsView: View {
                 result = (a.requestedAmount ?? 0) < (b.requestedAmount ?? 0)
             case .status:
                 result = a.status < b.status
+            case .requester:
+                result = (a.createdByName ?? "") < (b.createdByName ?? "")
             case .nextApprover:
                 result = (a.nextApproverName ?? "") < (b.nextApproverName ?? "")
             }
@@ -487,6 +491,7 @@ struct InvestmentRequestsView: View {
                             .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
                         
                         SortableColumnHeader(title: "Investment Request", column: .request, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.request) })
+                            .padding(.leading, 8)
                             .frame(minWidth: 150, maxWidth: .infinity, alignment: .leading)
                         
                         SortableColumnHeader(title: "Theater", column: .theater, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.theater) })
@@ -501,11 +506,15 @@ struct InvestmentRequestsView: View {
                         SortableColumnHeader(title: "Amount", column: .amount, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.amount) })
                             .frame(width: 100, alignment: .trailing)
                         
-                        SortableColumnHeader(title: "Status", column: .status, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.status) })
-                            .frame(width: 100, alignment: .center)
+                        SortableColumnHeader(title: "Requester", column: .requester, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.requester) })
+                            .padding(.leading, 8)
+                            .frame(minWidth: 80, maxWidth: .infinity, alignment: .leading)
                         
                         SortableColumnHeader(title: "Next Approver", column: .nextApprover, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.nextApprover) })
                             .frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
+                        
+                        SortableColumnHeader(title: "Status", column: .status, currentColumn: sortColumn, ascending: sortAscending, action: { toggleSort(.status) })
+                            .frame(width: 120, alignment: .center)
                         
                         Text("Actions")
                             .font(.caption)
@@ -749,6 +758,7 @@ struct RequestTableRow: View {
                 .font(.body)
                 .fontWeight(.medium)
                 .lineLimit(1)
+                .padding(.leading, 8)
                 .frame(minWidth: 150, maxWidth: .infinity, alignment: .leading)
             
             Text(request.theater ?? "—")
@@ -768,13 +778,20 @@ struct RequestTableRow: View {
                 .fontWeight(.medium)
                 .frame(width: 100, alignment: .trailing)
             
-            StatusBadge(status: request.status)
-                .frame(width: 100, alignment: .center)
+            Text(request.createdByName ?? "—")
+                .font(.callout)
+                .lineLimit(1)
+                .padding(.leading, 8)
+                .frame(minWidth: 80, maxWidth: .infinity, alignment: .leading)
             
             Text(request.nextApproverName ?? "—")
                 .font(.callout)
                 .lineLimit(1)
                 .frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
+            
+            StatusBadge(status: request.status)
+                .padding(.horizontal, 6)
+                .frame(width: 120, alignment: .center)
             
             HStack(spacing: 6) {
                 if request.isEditable {
@@ -894,6 +911,7 @@ struct NewRequestView: View {
     @State private var selectedAccount: SFDCAccount?
     @State private var accountSearchText = ""
     @State private var searchResults: [SFDCAccount] = []
+    @State private var totalSearchMatches: Int = 0
     @State private var isSearching = false
     @State private var investmentType = ""
     @State private var amount = ""
@@ -901,6 +919,7 @@ struct NewRequestView: View {
     @State private var quarter = ""
     @State private var theater = "US Majors"
     @State private var industrySegment = ""
+    @State private var pendingRegion: String?
     @State private var justification = ""
     @State private var expectedOutcome = ""
     @State private var riskAssessment = ""
@@ -927,7 +946,7 @@ struct NewRequestView: View {
     }
     
     private let investmentTypes = ["Professional Services", "Customer Success", "Training", "Support", "Partnership", "Other"]
-    private let theaters = ["US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]
+    private let theaters = ["USMajors", "USPubSec", "AMSExpansion", "AMSAcquisition", "EMEA", "APJ"]
     
     private var regionsForTheater: [String] {
         let regions = dataService.sfdcIndustriesByTheater[theater] ?? []
@@ -1015,37 +1034,66 @@ struct NewRequestView: View {
                                             }
                                         
                                         if !searchResults.isEmpty {
-                                            VStack(alignment: .leading, spacing: 0) {
-                                                ForEach(searchResults.prefix(5)) { account in
-                                                    Button(action: {
-                                                        selectedAccount = account
-                                                        accountSearchText = ""
-                                                        searchResults = []
-                                                        if let acctTheater = account.theater {
-                                                            theater = acctTheater
-                                                        }
-                                                        if let segment = account.industrySegment {
-                                                            industrySegment = segment
-                                                        }
-                                                    }) {
-                                                        HStack {
-                                                            Text(account.accountName)
-                                                            Spacer()
-                                                            if let t = account.theater {
-                                                                Text(t)
-                                                                    .font(.caption)
-                                                                    .foregroundColor(.secondary)
+                                            ScrollView {
+                                                VStack(alignment: .leading, spacing: 0) {
+                                                    ForEach(searchResults) { account in
+                                                        Button(action: {
+                                                            selectedAccount = account
+                                                            accountSearchText = ""
+                                                            searchResults = []
+                                                            let resolvedRegion: String?
+                                                            if let region = account.region {
+                                                                resolvedRegion = TheaterMapping.portfolioName(forRegion: region)
+                                                            } else if let segment = account.industrySegment {
+                                                                resolvedRegion = segment
+                                                            } else {
+                                                                resolvedRegion = nil
                                                             }
+                                                            pendingRegion = resolvedRegion
+                                                            if let acctTheater = account.theater {
+                                                                theater = acctTheater
+                                                            }
+                                                        }) {
+                                                            VStack(alignment: .leading, spacing: 2) {
+                                                                HStack {
+                                                                    Text(account.accountName)
+                                                                    Spacer()
+                                                                    HStack(spacing: 4) {
+                                                                        if let t = account.theater {
+                                                                            if let r = account.region {
+                                                                                let mapped = TheaterMapping.portfolioName(forRegion: r)
+                                                                                Text("\(t) · \(mapped)")
+                                                                                    .font(.caption)
+                                                                                    .foregroundColor(.secondary)
+                                                                            } else {
+                                                                                Text(t)
+                                                                                    .font(.caption)
+                                                                                    .foregroundColor(.secondary)
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                if let loc = account.billingLocation {
+                                                                    Text(loc)
+                                                                        .font(.caption)
+                                                                        .foregroundColor(.secondary)
+                                                                        .padding(.leading, 8)
+                                                                }
+                                                            }
+                                                            .padding(8)
                                                         }
-                                                        .padding(8)
+                                                        .buttonStyle(.plain)
                                                     }
-                                                    .buttonStyle(.plain)
-                                                    
-                                                    if account.id != searchResults.prefix(5).last?.id {
-                                                        Divider()
+                                                    if totalSearchMatches > 20 {
+                                                        Text("\(totalSearchMatches - 20) more matches — type more to narrow results")
+                                                            .font(.caption)
+                                                            .italic()
+                                                            .foregroundColor(.secondary)
+                                                            .padding(8)
                                                     }
                                                 }
                                             }
+                                            .frame(maxHeight: 300)
                                             .background(Color(NSColor.controlBackgroundColor))
                                             .cornerRadius(4)
                                             .shadow(radius: 2)
@@ -1092,9 +1140,15 @@ struct NewRequestView: View {
                                 LabeledField(label: "Region") {
                                     Picker("", selection: $industrySegment) {
                                         Text("Select...").tag("")
-                                        ForEach(regionsForTheater, id: \.self) { Text($0) }
+                                        ForEach(regionsForTheater, id: \.self) { region in Text(region).tag(region) }
                                     }
                                     .labelsHidden()
+                                    .onChange(of: theater) { _, _ in
+                                        if let pending = pendingRegion {
+                                            industrySegment = pending
+                                            pendingRegion = nil
+                                        }
+                                    }
                                 }
                             }
                             
@@ -1168,13 +1222,15 @@ struct NewRequestView: View {
     private func searchAccounts(query: String) {
         guard query.count >= 2 else {
             searchResults = []
+            totalSearchMatches = 0
             return
         }
         
         isSearching = true
-        dataService.searchAccounts(query: query) { accounts, _ in
+        dataService.searchAccounts(query: query) { accounts, total in
             isSearching = false
             searchResults = accounts
+            totalSearchMatches = total
         }
     }
     
@@ -1256,6 +1312,7 @@ struct RequestDetailView: View {
     @State private var editedAccount: SFDCAccount?
     @State private var accountSearchText = ""
     @State private var searchResults: [SFDCAccount] = []
+    @State private var totalSearchMatches: Int = 0
     @State private var isSearching = false
     @State private var editedInvestmentType: String = ""
     @State private var editedAmount: String = ""
@@ -1263,6 +1320,7 @@ struct RequestDetailView: View {
     @State private var editedQuarter: String = ""
     @State private var editedTheater: String = "US Majors"
     @State private var editedIndustrySegment: String = ""
+    @State private var pendingEditedRegion: String?
     @State private var editedJustification: String = ""
     @State private var editedOutcome: String = ""
     @State private var editedRisk: String = ""
@@ -1282,7 +1340,7 @@ struct RequestDetailView: View {
     }
     
     private let investmentTypes = ["Professional Services", "Customer Success", "Training", "Support", "Partnership", "Other"]
-    private let theaters = ["US Majors", "US Public Sector", "Americas Enterprise", "Americas Acquisition", "EMEA", "APJ"]
+    private let theaters = ["USMajors", "USPubSec", "AMSExpansion", "AMSAcquisition", "EMEA", "APJ"]
     
     private var regionsForEditedTheater: [String] {
         let regions = dataService.sfdcIndustriesByTheater[editedTheater] ?? []
@@ -1376,36 +1434,66 @@ struct RequestDetailView: View {
                                                     searchAccounts(query: newValue)
                                                 }
                                             if !searchResults.isEmpty {
-                                                VStack(alignment: .leading, spacing: 0) {
-                                                    ForEach(searchResults.prefix(5)) { account in
-                                                        Button(action: {
-                                                            editedAccount = account
-                                                            accountSearchText = ""
-                                                            searchResults = []
-                                                            if let acctTheater = account.theater {
-                                                                editedTheater = acctTheater
-                                                            }
-                                                            if let segment = account.industrySegment {
-                                                                editedIndustrySegment = segment
-                                                            }
-                                                        }) {
-                                                            HStack {
-                                                                Text(account.accountName)
-                                                                Spacer()
-                                                                if let t = account.theater {
-                                                                    Text(t)
-                                                                        .font(.caption)
-                                                                        .foregroundColor(.secondary)
+                                                ScrollView {
+                                                    VStack(alignment: .leading, spacing: 0) {
+                                                        ForEach(searchResults) { account in
+                                                            Button(action: {
+                                                                editedAccount = account
+                                                                accountSearchText = ""
+                                                                searchResults = []
+                                                                let resolvedRegion: String?
+                                                                if let region = account.region {
+                                                                    resolvedRegion = TheaterMapping.portfolioName(forRegion: region)
+                                                                } else if let segment = account.industrySegment {
+                                                                    resolvedRegion = segment
+                                                                } else {
+                                                                    resolvedRegion = nil
                                                                 }
+                                                                pendingEditedRegion = resolvedRegion
+                                                                if let acctTheater = account.theater {
+                                                                    editedTheater = acctTheater
+                                                                }
+                                                            }) {
+                                                                VStack(alignment: .leading, spacing: 2) {
+                                                                    HStack {
+                                                                        Text(account.accountName)
+                                                                        Spacer()
+                                                                        HStack(spacing: 4) {
+                                                                            if let t = account.theater {
+                                                                                if let r = account.region {
+                                                                                    let mapped = TheaterMapping.portfolioName(forRegion: r)
+                                                                                    Text("\(t) · \(mapped)")
+                                                                                        .font(.caption)
+                                                                                        .foregroundColor(.secondary)
+                                                                                } else {
+                                                                                    Text(t)
+                                                                                        .font(.caption)
+                                                                                        .foregroundColor(.secondary)
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    if let loc = account.billingLocation {
+                                                                        Text(loc)
+                                                                            .font(.caption)
+                                                                            .foregroundColor(.secondary)
+                                                                            .padding(.leading, 8)
+                                                                    }
+                                                                }
+                                                                .padding(8)
                                                             }
-                                                            .padding(8)
+                                                            .buttonStyle(.plain)
                                                         }
-                                                        .buttonStyle(.plain)
-                                                        if account.id != searchResults.prefix(5).last?.id {
-                                                            Divider()
+                                                        if totalSearchMatches > 20 {
+                                                            Text("\(totalSearchMatches - 20) more matches — type more to narrow results")
+                                                                .font(.caption)
+                                                                .italic()
+                                                                .foregroundColor(.secondary)
+                                                                .padding(8)
                                                         }
                                                     }
                                                 }
+                                                .frame(maxHeight: 300)
                                                 .background(Color(NSColor.controlBackgroundColor))
                                                 .cornerRadius(4)
                                                 .shadow(radius: 2)
@@ -1449,9 +1537,15 @@ struct RequestDetailView: View {
                                     LabeledField(label: "Region") {
                                         Picker("", selection: $editedIndustrySegment) {
                                             Text("Select...").tag("")
-                                            ForEach(regionsForEditedTheater, id: \.self) { Text($0) }
+                                            ForEach(regionsForEditedTheater, id: \.self) { region in Text(region).tag(region) }
                                         }
                                         .labelsHidden()
+                                        .onChange(of: editedTheater) { _, _ in
+                                            if let pending = pendingEditedRegion {
+                                                editedIndustrySegment = pending
+                                                pendingEditedRegion = nil
+                                            }
+                                        }
                                     }
                                 }
                                 
@@ -1768,7 +1862,7 @@ struct RequestDetailView: View {
         .onAppear {
             editedTitle = request.requestTitle
             if let name = request.accountName {
-                editedAccount = SFDCAccount(accountId: request.accountId ?? "", accountName: name, theater: request.theater, industrySegment: request.industrySegment, region: nil)
+                editedAccount = SFDCAccount(accountId: request.accountId ?? "", accountName: name, theater: request.theater, industrySegment: request.industrySegment, region: nil, billingCountry: nil, billingState: nil, billingCity: nil, isParent: nil)
             }
             editedInvestmentType = request.investmentType ?? ""
             if let amt = request.requestedAmount {
@@ -1820,12 +1914,14 @@ struct RequestDetailView: View {
     private func searchAccounts(query: String) {
         guard query.count >= 2 else {
             searchResults = []
+            totalSearchMatches = 0
             return
         }
         isSearching = true
-        dataService.searchAccounts(query: query) { accounts, _ in
+        dataService.searchAccounts(query: query) { accounts, total in
             isSearching = false
             searchResults = accounts
+            totalSearchMatches = total
         }
     }
     

@@ -13,10 +13,16 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-# Auto-increment build number
+# Auto-increment build number (reset on version change)
 OLD_BUILD=$(jq -r '.build_number' "$CONFIG_FILE")
-BUILD_NUMBER=$((OLD_BUILD + 1))
-jq --arg bn "$BUILD_NUMBER" '.build_number = $bn' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+CURRENT_VERSION=$(jq -r '.version' "$CONFIG_FILE")
+LAST_VERSION=$(jq -r '.last_version // ""' "$CONFIG_FILE")
+if [ "$CURRENT_VERSION" != "$LAST_VERSION" ]; then
+    BUILD_NUMBER=1
+else
+    BUILD_NUMBER=$((OLD_BUILD + 1))
+fi
+jq --arg bn "$BUILD_NUMBER" --arg lv "$CURRENT_VERSION" '.build_number = $bn | .last_version = $lv' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
 
 # Parse config
 APP_NAME=$(jq -r '.app_name' "$CONFIG_FILE")

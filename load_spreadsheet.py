@@ -27,14 +27,14 @@ STATUS_MAP = {
 }
 
 REGION_MAP = {
-    'CME': 'SCE',
+    'TMT': 'TMT',
     'FSI': 'FSI',
     'FSIGlobals': 'FSIGlobals',
     'HCLS': 'HCLS',
     'MFG': 'MFG',
     'RCG': 'RCG',
     'RetailCG': 'RCG',
-    'SCE': 'SCE'
+    'SCE': 'TMT'
 }
 
 def safe_float(val):

@@ -3,7 +3,6 @@ import db
 from helpers import (
     format_currency,
     IN_REVIEW_STATUSES,
-    normalize_theater,
     get_current_fiscal_quarter,
 )
 from components.filters import render_filters, apply_filters
