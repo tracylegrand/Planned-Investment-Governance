@@ -1082,6 +1082,7 @@ struct SummaryCard: View {
                 )
             )
             .cornerRadius(10)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.3), lineWidth: 0.5))
             .shadow(color: color.opacity(0.3), radius: 4, x: 0, y: 2)
         }
         .buttonStyle(.plain)
@@ -1123,7 +1124,7 @@ struct SummaryCardCompact: View {
             .cornerRadius(8)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(isHovering ? Color.black.opacity(0.3) : Color.clear, lineWidth: 2)
+                    .stroke(Color.black.opacity(isHovering ? 0.4 : 0.2), lineWidth: 0.5)
             )
             .shadow(color: color.opacity(0.2), radius: 2, x: 0, y: 1)
         }

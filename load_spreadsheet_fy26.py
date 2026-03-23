@@ -207,9 +207,10 @@ def load_investments():
     cursor.execute("USE SCHEMA INVESTMENT_GOVERNANCE")
     
     cursor.execute("""
-        SELECT ACCOUNT_NAME, REP_NAME, AE_EMPLOYEE_ID 
-        FROM SALES.ACCOUNT_BASIC.DETAILS 
-        WHERE REP_NAME IS NOT NULL
+        SELECT a.NAME AS ACCOUNT_NAME, v.AE AS REP_NAME, v.AE_EMAIL AS AE_EMPLOYEE_ID
+        FROM SNOWSCIENCE.DIMENSIONS.ACCOUNT_CONTACTS_VW v
+        JOIN FIVETRAN.SALESFORCE.ACCOUNT a ON a.ID = v.SALESFORCE_ACCOUNT_ID
+        WHERE v.AE IS NOT NULL
     """)
     ae_lookup = {}
     for row in cursor.fetchall():
