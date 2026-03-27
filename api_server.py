@@ -10,8 +10,6 @@ import sqlite3
 import sys
 import threading
 import time
-import atexit
-import signal
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +17,11 @@ from pathlib import Path
 import snowflake.connector
 from flask import Flask, jsonify, request
 from werkzeug.serving import make_server
+
+from api_foundation.port_file import setup_port_file
+from api_foundation.snowflake_conn import create_connection_factory
+from api_foundation.serializer import json_serializer
+from api_foundation.progress import create_progress_tracker
 
 app = Flask(__name__)
 
@@ -69,38 +72,27 @@ for _raw, _port in REGION_TO_PORTFOLIO.items():
     PORTFOLIO_TO_RAW_REGIONS.setdefault(_port, set()).add(_raw)
 
 cache_lock = threading.Lock()
-progress_lock = threading.Lock()
 impersonation_lock = threading.Lock()
 
-cache_progress = {
-    "status": "idle",
-    "current_step": "",
-    "steps_completed": 0,
-    "total_steps": 7,
-    "message": ""
-}
+cache_progress, progress_lock, update_progress, get_progress, reset_progress, complete_progress = create_progress_tracker(total_steps=7)
 
 impersonated_user = None
 
-def get_snowflake_connection(dml=False):
-    conn = snowflake.connector.connect(connection_name=CONNECTION_NAME)
-    wh = DML_WAREHOUSE if dml else READ_WAREHOUSE
-    conn.cursor().execute(f"USE WAREHOUSE {wh}")
-    return conn
+get_snowflake_connection = create_connection_factory(
+    default_connection_name=RUNTIME_CONFIG.get("connection_name", "DemoAcct"),
+    persistent=False,
+    pat_fallback=False,
+    read_warehouse=READ_WAREHOUSE,
+    dml_warehouse=DML_WAREHOUSE,
+    keep_alive=False,
+)
 
 def get_cache_connection():
     conn = sqlite3.connect(str(CACHE_DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
-def json_serializer(obj):
-    if isinstance(obj, (date, datetime)):
-        return obj.isoformat()
-    if isinstance(obj, Decimal):
-        return float(obj)
-    if isinstance(obj, bool):
-        return obj
-    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
 
 def init_cache_db():
     conn = get_cache_connection()
@@ -508,14 +500,7 @@ def update_cache_timestamp(data_source, sf_timestamp):
     finally:
         conn.close()
 
-def update_progress(step_name, steps_completed, message="", total_steps=7):
-    global cache_progress
-    with progress_lock:
-        cache_progress["status"] = "loading"
-        cache_progress["current_step"] = step_name
-        cache_progress["steps_completed"] = steps_completed
-        cache_progress["total_steps"] = total_steps
-        cache_progress["message"] = message
+
 
 def resolve_approval_chain(employee_id, theater):
     final_approver_eid = None
@@ -2653,27 +2638,14 @@ def update_sfdc_link(request_id):
     sync_to_snowflake(_sync)
     return jsonify(result)
 
-def _write_port_file(port):
-    os.makedirs(os.path.dirname(PORT_FILE), exist_ok=True)
-    with open(PORT_FILE, "w") as f:
-        f.write(str(port))
-    print(f"[API] Port file written: {PORT_FILE} -> {port}", flush=True)
-
-
-def _remove_port_file():
-    try:
-        os.remove(PORT_FILE)
-    except FileNotFoundError:
-        pass
-
-
 if __name__ == '__main__':
     port = int(os.environ.get("API_PORT", "0"))
     server = make_server("127.0.0.1", port, app, threaded=True)
     actual_port = server.server_address[1]
-    _write_port_file(actual_port)
-    atexit.register(_remove_port_file)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
+    _, write_port, _ = setup_port_file(APP_DIR_NAME)
+    write_port(actual_port)
+
     print(f"[API] Listening on http://127.0.0.1:{actual_port}", flush=True)
     print(f"Using Snowflake connection: {CONNECTION_NAME}")
     print(f"Cache database: {CACHE_DB_PATH}")
