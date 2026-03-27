@@ -3,10 +3,28 @@ import Foundation
 class DataService: ObservableObject {
     static let shared = DataService()
     
-    private let baseURL = "http://127.0.0.1:8770/api"
+    private(set) var baseURL = "http://127.0.0.1:8770/api"
     private let session = URLSession.shared
     private var serverProcess: Process?
     private var progressTimer: Timer?
+
+    func configure(port: Int) {
+        baseURL = "http://127.0.0.1:\(port)/api"
+    }
+
+    private static let portFilePath: String = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("investmentgovernance").appendingPathComponent("api.port").path
+    }()
+
+    static func readPortFile() -> Int? {
+        guard let contents = try? String(contentsOfFile: portFilePath, encoding: .utf8) else { return nil }
+        return Int(contents.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    static func removePortFile() {
+        try? FileManager.default.removeItem(atPath: portFilePath)
+    }
     
     @Published var currentUser: User?
     @Published var investmentRequests: [InvestmentRequest] = []
@@ -26,6 +44,11 @@ class DataService: ObservableObject {
         f.formatOptions = [.withFullDate]
         return f
     }()
+
+    deinit {
+        serverProcess?.terminate()
+        DataService.removePortFile()
+    }
     
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -61,7 +84,7 @@ class DataService: ObservableObject {
                 return
             }
             
-            let healthURL = URL(string: "http://localhost:8770/api/health")!
+            let healthURL = URL(string: "\(self.baseURL)/health")!
             let request = URLRequest(url: healthURL, timeoutInterval: 2)
             
             session.dataTask(with: request) { [weak self] _, response, error in
@@ -133,19 +156,25 @@ class DataService: ObservableObject {
             try process.run()
             serverProcess = process
 
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
-                let healthURL = URL(string: "http://localhost:8770/api/health")!
-                let request = URLRequest(url: healthURL, timeoutInterval: 2)
-
-                self.session.dataTask(with: request) { _, response, _ in
-                    if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                        print("API server started successfully")
-                        DispatchQueue.main.async { completion(true) }
-                    } else {
-                        print("API server failed to start")
-                        DispatchQueue.main.async { completion(false) }
+            DispatchQueue.global().async { [weak self] in
+                var discoveredPort: Int?
+                for _ in 0..<120 {
+                    Thread.sleep(forTimeInterval: 0.5)
+                    if let port = DataService.readPortFile() {
+                        discoveredPort = port
+                        break
                     }
-                }.resume()
+                }
+                guard let port = discoveredPort else {
+                    print("[API] Server did not write port file within 60s")
+                    DispatchQueue.main.async { completion(false) }
+                    return
+                }
+                DispatchQueue.main.async {
+                    self?.configure(port: port)
+                }
+                print("[API] Server running on dynamic port \(port)")
+                DispatchQueue.main.async { completion(true) }
             }
         } catch {
             print("Failed to start API server: \(error)")
@@ -159,7 +188,7 @@ class DataService: ObservableObject {
             self.cacheProgress.message = "Starting API server..."
         }
         
-        let healthURL = URL(string: "http://127.0.0.1:8770/api/health")!
+        let healthURL = URL(string: "\(baseURL)/health")!
         var serverStartAttempts = 0
         
         func tryConnect(attempt: Int) {

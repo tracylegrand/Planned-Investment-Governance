@@ -7,14 +7,18 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
+import atexit
+import signal
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
 import snowflake.connector
 from flask import Flask, jsonify, request
+from werkzeug.serving import make_server
 
 app = Flask(__name__)
 
@@ -23,7 +27,12 @@ CONFIG_FILE = SCRIPT_DIR / "config" / "standard.json"
 with open(CONFIG_FILE) as f:
     RUNTIME_CONFIG = json.load(f)
 
-API_PORT = RUNTIME_CONFIG.get("api_port", 8767)
+APP_DIR_NAME = "investmentgovernance"
+PORT_FILE = os.path.join(
+    os.path.expanduser("~/Library/Application Support"),
+    APP_DIR_NAME,
+    "api.port"
+)
 CACHE_DB_NAME = RUNTIME_CONFIG.get("cache_db", "cache.db")
 CONNECTION_NAME = os.environ.get("SNOWFLAKE_CONNECTION_NAME", RUNTIME_CONFIG.get("connection_name", "DemoAcct"))
 DML_WAREHOUSE = RUNTIME_CONFIG.get("dml_warehouse", "SNOWHOUSE")
@@ -216,6 +225,40 @@ def init_cache_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_requests_quarter ON cached_investment_requests(investment_quarter)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_accounts_name ON cached_accounts(account_name)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_steps_request ON cached_approval_steps(request_id)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS cached_budgets (
+            budget_id INTEGER PRIMARY KEY,
+            fiscal_year TEXT,
+            theater TEXT,
+            industry_segment TEXT,
+            portfolio TEXT,
+            budget_amount REAL,
+            allocated_amount REAL,
+            q1_budget REAL,
+            q2_budget REAL,
+            q3_budget REAL,
+            q4_budget REAL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS cached_request_opportunities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL,
+            opportunity_id TEXT NOT NULL,
+            opportunity_name TEXT,
+            account_id TEXT,
+            account_name TEXT,
+            stage TEXT,
+            amount REAL,
+            close_date TEXT,
+            owner_name TEXT,
+            linked_by TEXT,
+            syncStatus TEXT DEFAULT 'synced'
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_req_opps ON cached_request_opportunities(request_id)")
 
     conn.commit()
     conn.close()
@@ -1012,14 +1055,21 @@ def get_approval_chain_endpoint():
     chain = resolve_approval_chain(employee_id, theater)
     return jsonify(chain)
 
+_team_members_cache = {}
+_team_members_cache_time = {}
+TEAM_MEMBERS_CACHE_TTL = 300
+
 @app.route('/api/team-members')
 def get_team_members():
     user = get_effective_user()
     if not user or not user.get("employee_id"):
         return jsonify({"error": "No current user"}), 400
     manager_eid = int(user["employee_id"])
-    sf_conn = get_snowflake_connection()
+    now = time.time()
+    if manager_eid in _team_members_cache and (now - _team_members_cache_time.get(manager_eid, 0)) < TEAM_MEMBERS_CACHE_TTL:
+        return jsonify({"employee_ids": _team_members_cache[manager_eid]})
     try:
+        sf_conn = get_snowflake_connection()
         cur = sf_conn.cursor()
         cur.execute("""
             WITH RECURSIVE team AS (
@@ -1035,11 +1085,14 @@ def get_team_members():
             SELECT EMPLOYEE_ID FROM team
         """, (manager_eid,))
         ids = [int(r[0]) for r in cur.fetchall()]
+        sf_conn.close()
+        _team_members_cache[manager_eid] = ids
+        _team_members_cache_time[manager_eid] = now
         return jsonify({"employee_ids": ids})
     except Exception as e:
+        if manager_eid in _team_members_cache:
+            return jsonify({"employee_ids": _team_members_cache[manager_eid]})
         return jsonify({"error": str(e)}), 500
-    finally:
-        sf_conn.close()
 
 @app.route('/api/summary')
 def get_summary():
@@ -1091,8 +1144,31 @@ def get_summary():
 
 @app.route('/api/budgets')
 def get_budgets():
-    sf_conn = get_snowflake_connection()
+    cache_conn = get_cache_connection()
     try:
+        cur = cache_conn.cursor()
+        cur.execute("""
+            SELECT budget_id, fiscal_year, theater, industry_segment, portfolio, budget_amount, allocated_amount,
+                   q1_budget, q2_budget, q3_budget, q4_budget
+            FROM cached_budgets
+            ORDER BY fiscal_year DESC, theater, industry_segment
+        """)
+        rows = cur.fetchall()
+        if rows:
+            return jsonify([{
+                'BUDGET_ID': r['budget_id'], 'FISCAL_YEAR': r['fiscal_year'],
+                'THEATER': r['theater'], 'INDUSTRY_SEGMENT': r['industry_segment'],
+                'PORTFOLIO': r['portfolio'], 'BUDGET_AMOUNT': r['budget_amount'],
+                'ALLOCATED_AMOUNT': r['allocated_amount'],
+                'Q1_BUDGET': r['q1_budget'], 'Q2_BUDGET': r['q2_budget'],
+                'Q3_BUDGET': r['q3_budget'], 'Q4_BUDGET': r['q4_budget']
+            } for r in rows])
+    except Exception:
+        pass
+    finally:
+        cache_conn.close()
+    try:
+        sf_conn = get_snowflake_connection()
         cur = sf_conn.cursor()
         cur.execute("""
             SELECT BUDGET_ID, FISCAL_YEAR, THEATER, INDUSTRY_SEGMENT, PORTFOLIO, BUDGET_AMOUNT, ALLOCATED_AMOUNT,
@@ -1101,14 +1177,25 @@ def get_budgets():
             ORDER BY FISCAL_YEAR DESC, THEATER, INDUSTRY_SEGMENT
         """)
         rows = cur.fetchall()
+        sf_conn.close()
         columns = ['BUDGET_ID', 'FISCAL_YEAR', 'THEATER', 'INDUSTRY_SEGMENT', 'PORTFOLIO', 'BUDGET_AMOUNT', 'ALLOCATED_AMOUNT',
                    'Q1_BUDGET', 'Q2_BUDGET', 'Q3_BUDGET', 'Q4_BUDGET']
-        return jsonify([dict(zip(columns, [float(v) if isinstance(v, Decimal) else v for v in row])) for row in rows])
+        result = [dict(zip(columns, [float(v) if isinstance(v, Decimal) else v for v in row])) for row in rows]
+        cc = get_cache_connection()
+        try:
+            cc.execute("DELETE FROM cached_budgets")
+            for r in result:
+                cc.execute("INSERT INTO cached_budgets VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (r['BUDGET_ID'], r['FISCAL_YEAR'], r['THEATER'], r['INDUSTRY_SEGMENT'],
+                     r['PORTFOLIO'], r['BUDGET_AMOUNT'], r['ALLOCATED_AMOUNT'],
+                     r['Q1_BUDGET'], r['Q2_BUDGET'], r['Q3_BUDGET'], r['Q4_BUDGET']))
+            cc.commit()
+        finally:
+            cc.close()
+        return jsonify(result)
     except Exception as e:
         print(f"Error fetching budgets: {e}")
         return jsonify([])
-    finally:
-        sf_conn.close()
 
 @app.route('/api/budgets/import', methods=['POST'])
 def import_budgets():
@@ -1118,10 +1205,10 @@ def import_budgets():
     budgets = data.get("budgets", [])
     if not budgets:
         return jsonify({"error": "No budget data provided"}), 400
-    sf_conn = get_snowflake_connection(dml=True)
+    cache_conn = get_cache_connection()
+    imported = 0
     try:
-        cur = sf_conn.cursor()
-        imported = 0
+        cur = cache_conn.cursor()
         for b in budgets:
             fy = b.get("fiscal_year")
             portfolio = b.get("portfolio")
@@ -1132,23 +1219,49 @@ def import_budgets():
             q4 = float(b.get("q4_budget", 0))
             total = float(b.get("budget_amount", q1 + q2 + q3 + q4))
             cur.execute("""
-                MERGE INTO TEMP.INVESTMENT_GOVERNANCE.ANNUAL_BUDGETS t
-                USING (SELECT %s AS FY, %s AS TH, %s AS IND) s
-                ON t.FISCAL_YEAR = s.FY AND t.THEATER = s.TH AND t.INDUSTRY_SEGMENT = s.IND
-                WHEN MATCHED THEN UPDATE SET
-                    Q1_BUDGET = %s, Q2_BUDGET = %s, Q3_BUDGET = %s, Q4_BUDGET = %s,
-                    BUDGET_AMOUNT = %s
-                WHEN NOT MATCHED THEN INSERT
-                    (FISCAL_YEAR, THEATER, INDUSTRY_SEGMENT, PORTFOLIO, Q1_BUDGET, Q2_BUDGET, Q3_BUDGET, Q4_BUDGET, BUDGET_AMOUNT, ALLOCATED_AMOUNT)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
-            """, (fy, theater, portfolio, q1, q2, q3, q4, total, fy, theater, portfolio, portfolio, q1, q2, q3, q4, total))
+                INSERT OR REPLACE INTO cached_budgets
+                (budget_id, fiscal_year, theater, industry_segment, portfolio, budget_amount, allocated_amount,
+                 q1_budget, q2_budget, q3_budget, q4_budget)
+                VALUES ((SELECT budget_id FROM cached_budgets WHERE fiscal_year = ? AND theater = ? AND industry_segment = ?),
+                        ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            """, (fy, theater, portfolio, fy, theater, portfolio, portfolio, total, q1, q2, q3, q4))
             imported += 1
-        return jsonify({"success": True, "imported": imported})
-    except Exception as e:
-        print(f"Error importing budgets: {e}")
-        return jsonify({"error": str(e)}), 500
+        cache_conn.commit()
     finally:
-        sf_conn.close()
+        cache_conn.close()
+    budgets_copy = list(budgets)
+    def _sync():
+        sf_conn = get_snowflake_connection(dml=True)
+        try:
+            sf_cur = sf_conn.cursor()
+            for b in budgets_copy:
+                fy = b.get("fiscal_year")
+                portfolio = b.get("portfolio")
+                theater = b.get("theater", "US Majors")
+                q1 = float(b.get("q1_budget", 0))
+                q2 = float(b.get("q2_budget", 0))
+                q3 = float(b.get("q3_budget", 0))
+                q4 = float(b.get("q4_budget", 0))
+                total = float(b.get("budget_amount", q1 + q2 + q3 + q4))
+                sf_cur.execute("""
+                    MERGE INTO TEMP.INVESTMENT_GOVERNANCE.ANNUAL_BUDGETS t
+                    USING (SELECT %s AS FY, %s AS TH, %s AS IND) s
+                    ON t.FISCAL_YEAR = s.FY AND t.THEATER = s.TH AND t.INDUSTRY_SEGMENT = s.IND
+                    WHEN MATCHED THEN UPDATE SET
+                        Q1_BUDGET = %s, Q2_BUDGET = %s, Q3_BUDGET = %s, Q4_BUDGET = %s,
+                        BUDGET_AMOUNT = %s
+                    WHEN NOT MATCHED THEN INSERT
+                        (FISCAL_YEAR, THEATER, INDUSTRY_SEGMENT, PORTFOLIO, Q1_BUDGET, Q2_BUDGET, Q3_BUDGET, Q4_BUDGET, BUDGET_AMOUNT, ALLOCATED_AMOUNT)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
+                """, (fy, theater, portfolio, q1, q2, q3, q4, total, fy, theater, portfolio, portfolio, q1, q2, q3, q4, total))
+            sf_conn.commit()
+            print(f"[Background] Synced {len(budgets_copy)} budgets to Snowflake")
+        except Exception as e:
+            print(f"[Background] Error syncing budgets: {e}")
+        finally:
+            sf_conn.close()
+    sync_to_snowflake(_sync)
+    return jsonify({"success": True, "imported": imported})
 
 @app.route('/api/requests')
 def get_requests():
@@ -2251,10 +2364,17 @@ def get_theaters_industries():
     finally:
         cache_conn.close()
 
+_acct_opps_cache = {}
+_acct_opps_cache_time = {}
+ACCT_OPPS_CACHE_TTL = 120
+
 @app.route('/api/accounts/<account_id>/opportunities')
 def get_account_opportunities(account_id):
-    sf_conn = get_snowflake_connection()
+    now = time.time()
+    if account_id in _acct_opps_cache and (now - _acct_opps_cache_time.get(account_id, 0)) < ACCT_OPPS_CACHE_TTL:
+        return jsonify(_acct_opps_cache[account_id])
     try:
+        sf_conn = get_snowflake_connection()
         cur = sf_conn.cursor()
         cur.execute("""
             SELECT OPPORTUNITY_ID, OPPORTUNITY_NAME, ACCOUNT_ID, ACCOUNT_NAME,
@@ -2265,8 +2385,8 @@ def get_account_opportunities(account_id):
             LIMIT 50
         """, (account_id,))
         rows = cur.fetchall()
-
-        return jsonify([{
+        sf_conn.close()
+        result = [{
             "OPPORTUNITY_ID": row[0],
             "OPPORTUNITY_NAME": row[1],
             "ACCOUNT_ID": row[2],
@@ -2275,17 +2395,45 @@ def get_account_opportunities(account_id):
             "AMOUNT": float(row[5]) if row[5] else None,
             "CLOSE_DATE": row[6].isoformat() if row[6] else None,
             "OWNER_NAME": row[7]
-        } for row in rows])
+        } for row in rows]
+        _acct_opps_cache[account_id] = result
+        _acct_opps_cache_time[account_id] = now
+        return jsonify(result)
     except Exception as e:
+        if account_id in _acct_opps_cache:
+            return jsonify(_acct_opps_cache[account_id])
         print(f"Error fetching opportunities: {e}")
         return jsonify([])
-    finally:
-        sf_conn.close()
 
 @app.route('/api/requests/<int:request_id>/opportunities')
 def get_request_opportunities(request_id):
-    sf_conn = get_snowflake_connection()
+    cache_conn = get_cache_connection()
     try:
+        cur = cache_conn.cursor()
+        cur.execute("""
+            SELECT opportunity_id, opportunity_name, account_id, account_name,
+                   stage, amount, close_date, owner_name
+            FROM cached_request_opportunities
+            WHERE request_id = ?
+        """, (request_id,))
+        rows = cur.fetchall()
+        if rows:
+            return jsonify([{
+                "OPPORTUNITY_ID": r["opportunity_id"],
+                "OPPORTUNITY_NAME": r["opportunity_name"],
+                "ACCOUNT_ID": r["account_id"],
+                "ACCOUNT_NAME": r["account_name"],
+                "STAGE": r["stage"],
+                "AMOUNT": r["amount"],
+                "CLOSE_DATE": r["close_date"],
+                "OWNER_NAME": r["owner_name"]
+            } for r in rows])
+    except Exception:
+        pass
+    finally:
+        cache_conn.close()
+    try:
+        sf_conn = get_snowflake_connection()
         cur = sf_conn.cursor()
         cur.execute("""
             SELECT o.OPPORTUNITY_ID, o.OPPORTUNITY_NAME, o.ACCOUNT_ID, o.ACCOUNT_NAME,
@@ -2294,9 +2442,9 @@ def get_request_opportunities(request_id):
             JOIN SFDC_SHARED.SFDC_VIEWS.OPPORTUNITIES o ON ro.OPPORTUNITY_ID = o.OPPORTUNITY_ID
             WHERE ro.REQUEST_ID = %s
         """, (request_id,))
-        rows = cur.fetchall()
-
-        return jsonify([{
+        rows = sf_conn.cursor().fetchall() if False else cur.fetchall()
+        sf_conn.close()
+        result = [{
             "OPPORTUNITY_ID": row[0],
             "OPPORTUNITY_NAME": row[1],
             "ACCOUNT_ID": row[2],
@@ -2305,57 +2453,84 @@ def get_request_opportunities(request_id):
             "AMOUNT": float(row[5]) if row[5] else None,
             "CLOSE_DATE": row[6].isoformat() if row[6] else None,
             "OWNER_NAME": row[7]
-        } for row in rows])
+        } for row in rows]
+        cc = get_cache_connection()
+        try:
+            cc.execute("DELETE FROM cached_request_opportunities WHERE request_id = ?", (request_id,))
+            for r in result:
+                cc.execute("""
+                    INSERT INTO cached_request_opportunities (request_id, opportunity_id, opportunity_name,
+                        account_id, account_name, stage, amount, close_date, owner_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (request_id, r["OPPORTUNITY_ID"], r["OPPORTUNITY_NAME"], r["ACCOUNT_ID"],
+                       r["ACCOUNT_NAME"], r["STAGE"], r["AMOUNT"], r["CLOSE_DATE"], r["OWNER_NAME"]))
+            cc.commit()
+        finally:
+            cc.close()
+        return jsonify(result)
     except Exception as e:
         print(f"Error fetching request opportunities: {e}")
         return jsonify([])
-    finally:
-        sf_conn.close()
 
 @app.route('/api/requests/<int:request_id>/opportunities', methods=['POST'])
 def link_opportunity(request_id):
     data = request.json
     opportunity_id = data.get('OPPORTUNITY_ID')
-
     if not opportunity_id:
         return jsonify({"error": "OPPORTUNITY_ID required"}), 400
-
-    sf_conn = get_snowflake_connection(dml=True)
+    effective = get_effective_user()
+    current_user = effective["username"] if effective else "UNKNOWN"
+    cache_conn = get_cache_connection()
     try:
-        cur = sf_conn.cursor()
-
-        effective = get_effective_user()
-        current_user = effective["username"] if effective else "UNKNOWN"
-
-        cur.execute("""
-            INSERT INTO TEMP.INVESTMENT_GOVERNANCE.REQUEST_OPPORTUNITIES
-            (REQUEST_ID, OPPORTUNITY_ID, LINKED_BY)
-            VALUES (%s, %s, %s)
-        """, (request_id, opportunity_id, current_user))
-        sf_conn.commit()
-
-        return jsonify({"message": "Opportunity linked"}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        cache_conn.execute("""
+            INSERT INTO cached_request_opportunities (request_id, opportunity_id, opportunity_name,
+                account_id, account_name, stage, amount, close_date, owner_name, linked_by, syncStatus)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        """, (request_id, opportunity_id, data.get('OPPORTUNITY_NAME'), data.get('ACCOUNT_ID'),
+               data.get('ACCOUNT_NAME'), data.get('STAGE'), data.get('AMOUNT'),
+               data.get('CLOSE_DATE'), data.get('OWNER_NAME'), current_user))
+        cache_conn.commit()
     finally:
-        sf_conn.close()
+        cache_conn.close()
+    def _sync():
+        sf_conn = get_snowflake_connection(dml=True)
+        try:
+            sf_conn.cursor().execute("""
+                INSERT INTO TEMP.INVESTMENT_GOVERNANCE.REQUEST_OPPORTUNITIES
+                (REQUEST_ID, OPPORTUNITY_ID, LINKED_BY)
+                VALUES (%s, %s, %s)
+            """, (request_id, opportunity_id, current_user))
+            sf_conn.commit()
+        except Exception as e:
+            print(f"[Background] Error syncing link opportunity: {e}")
+        finally:
+            sf_conn.close()
+    sync_to_snowflake(_sync)
+    return jsonify({"message": "Opportunity linked"}), 201
 
 @app.route('/api/requests/<int:request_id>/opportunities/<opportunity_id>', methods=['DELETE'])
 def unlink_opportunity(request_id, opportunity_id):
-    sf_conn = get_snowflake_connection(dml=True)
+    cache_conn = get_cache_connection()
     try:
-        cur = sf_conn.cursor()
-        cur.execute("""
-            DELETE FROM TEMP.INVESTMENT_GOVERNANCE.REQUEST_OPPORTUNITIES
-            WHERE REQUEST_ID = %s AND OPPORTUNITY_ID = %s
-        """, (request_id, opportunity_id))
-        sf_conn.commit()
-
-        return jsonify({"message": "Opportunity unlinked"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        cache_conn.execute("DELETE FROM cached_request_opportunities WHERE request_id = ? AND opportunity_id = ?",
+                           (request_id, opportunity_id))
+        cache_conn.commit()
     finally:
-        sf_conn.close()
+        cache_conn.close()
+    def _sync():
+        sf_conn = get_snowflake_connection(dml=True)
+        try:
+            sf_conn.cursor().execute("""
+                DELETE FROM TEMP.INVESTMENT_GOVERNANCE.REQUEST_OPPORTUNITIES
+                WHERE REQUEST_ID = %s AND OPPORTUNITY_ID = %s
+            """, (request_id, opportunity_id))
+            sf_conn.commit()
+        except Exception as e:
+            print(f"[Background] Error syncing unlink: {e}")
+        finally:
+            sf_conn.close()
+    sync_to_snowflake(_sync)
+    return jsonify({"message": "Opportunity unlinked"})
 
 
 def _parse_sfdc_opportunity_id(url_or_id):
@@ -2428,7 +2603,6 @@ def get_sfdc_opportunity_status_by_url():
 def update_sfdc_link(request_id):
     data = request.json
     sfdc_url = data.get('SFDC_OPPORTUNITY_LINK', '')
-
     cache_conn = get_cache_connection()
     try:
         cur = cache_conn.cursor()
@@ -2440,66 +2614,69 @@ def update_sfdc_link(request_id):
             return jsonify({"error": "SFDC link can only be updated on Approved for IC requests"}), 400
     finally:
         cache_conn.close()
-
     opp_id = _parse_sfdc_opportunity_id(sfdc_url)
-
     now_iso = datetime.now().isoformat()
-
-    sf_conn = get_snowflake_connection(dml=True)
+    cache_conn2 = get_cache_connection()
     try:
-        cur = sf_conn.cursor()
-        cur.execute("""
-            UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
-            SET SFDC_OPPORTUNITY_LINK = %s, UPDATED_AT = CURRENT_TIMESTAMP()
-            WHERE REQUEST_ID = %s
-        """, (sfdc_url, request_id))
-        sf_conn.commit()
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        sf_conn.close()
-
-    cache_conn = get_cache_connection()
-    try:
-        cur = cache_conn.cursor()
-        cur.execute(
+        cache_conn2.execute(
             "UPDATE cached_investment_requests SET sfdc_opportunity_link = ?, updated_at = ? WHERE request_id = ?",
             (sfdc_url, now_iso, request_id)
         )
-        cache_conn.commit()
+        cache_conn2.commit()
     finally:
-        cache_conn.close()
-
-    if opp_id:
-        sf_conn2 = get_snowflake_connection(dml=True)
-        try:
-            cur2 = sf_conn2.cursor()
-            effective = get_effective_user()
-            current_user = effective["username"] if effective else "UNKNOWN"
-            cur2.execute("""
-                MERGE INTO TEMP.INVESTMENT_GOVERNANCE.REQUEST_OPPORTUNITIES t
-                USING (SELECT %s AS REQUEST_ID, %s AS OPPORTUNITY_ID) s
-                ON t.REQUEST_ID = s.REQUEST_ID AND t.OPPORTUNITY_ID = s.OPPORTUNITY_ID
-                WHEN NOT MATCHED THEN INSERT (REQUEST_ID, OPPORTUNITY_ID, LINKED_BY) VALUES (s.REQUEST_ID, s.OPPORTUNITY_ID, %s)
-            """, (request_id, opp_id, current_user))
-            sf_conn2.commit()
-        except Exception as e:
-            print(f"Warning: Could not auto-link opportunity: {e}")
-        finally:
-            sf_conn2.close()
-
+        cache_conn2.close()
     result = {"message": "SFDC link updated", "sfdc_opportunity_link": sfdc_url}
     if opp_id:
         result["parsed_opportunity_id"] = opp_id
+    effective = get_effective_user()
+    current_user = effective["username"] if effective else "UNKNOWN"
+    def _sync():
+        try:
+            sf_conn = get_snowflake_connection(dml=True)
+            cur = sf_conn.cursor()
+            cur.execute("""
+                UPDATE TEMP.INVESTMENT_GOVERNANCE.INVESTMENT_REQUESTS
+                SET SFDC_OPPORTUNITY_LINK = %s, UPDATED_AT = CURRENT_TIMESTAMP()
+                WHERE REQUEST_ID = %s
+            """, (sfdc_url, request_id))
+            if opp_id:
+                cur.execute("""
+                    MERGE INTO TEMP.INVESTMENT_GOVERNANCE.REQUEST_OPPORTUNITIES t
+                    USING (SELECT %s AS REQUEST_ID, %s AS OPPORTUNITY_ID) s
+                    ON t.REQUEST_ID = s.REQUEST_ID AND t.OPPORTUNITY_ID = s.OPPORTUNITY_ID
+                    WHEN NOT MATCHED THEN INSERT (REQUEST_ID, OPPORTUNITY_ID, LINKED_BY) VALUES (s.REQUEST_ID, s.OPPORTUNITY_ID, %s)
+                """, (request_id, opp_id, current_user))
+            sf_conn.commit()
+            sf_conn.close()
+        except Exception as e:
+            print(f"[Background] Error syncing sfdc-link: {e}")
+    sync_to_snowflake(_sync)
     return jsonify(result)
 
+def _write_port_file(port):
+    os.makedirs(os.path.dirname(PORT_FILE), exist_ok=True)
+    with open(PORT_FILE, "w") as f:
+        f.write(str(port))
+    print(f"[API] Port file written: {PORT_FILE} -> {port}", flush=True)
+
+
+def _remove_port_file():
+    try:
+        os.remove(PORT_FILE)
+    except FileNotFoundError:
+        pass
+
+
 if __name__ == '__main__':
-    print(f"Starting Investment Governance API Server on port {API_PORT}")
+    port = int(os.environ.get("API_PORT", "0"))
+    server = make_server("127.0.0.1", port, app, threaded=True)
+    actual_port = server.server_address[1]
+    _write_port_file(actual_port)
+    atexit.register(_remove_port_file)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    print(f"[API] Listening on http://127.0.0.1:{actual_port}", flush=True)
     print(f"Using Snowflake connection: {CONNECTION_NAME}")
     print(f"Cache database: {CACHE_DB_PATH}")
-
     init_cache_db()
-
     threading.Thread(target=startup_cache_check, daemon=True).start()
-
-    app.run(host='127.0.0.1', port=API_PORT, debug=False, threaded=True)
+    server.serve_forever()
