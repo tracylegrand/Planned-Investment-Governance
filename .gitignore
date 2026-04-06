@@ -19,3 +19,4 @@ Package.resolved
 build/
 *.app/
 .snowflake/
+*.bak
