@@ -115,7 +115,7 @@ class DataService: ObservableObject {
 
     private func startAPIServer(attempt: Int, completion: @escaping (Bool) -> Void) {
         let maxAttempts = 10
-        let serverPath = "\(NSHomeDirectory())/Documents/projects/Planned-Investment-Governance/api_server.py"
+        let serverPath = "\(NSHomeDirectory())/projects/Planned-Investment-Governance/api_server.py"
         let serverDir = (serverPath as NSString).deletingLastPathComponent
 
         if !FileManager.default.fileExists(atPath: serverPath) {
@@ -188,7 +188,10 @@ class DataService: ObservableObject {
             self.cacheProgress.message = "Starting API server..."
         }
         
-        let healthURL = URL(string: "\(baseURL)/health")!
+        if let existingPort = DataService.readPortFile() {
+            configure(port: existingPort)
+        }
+
         var serverStartAttempts = 0
         
         func tryConnect(attempt: Int) {
@@ -206,8 +209,12 @@ class DataService: ObservableObject {
                     self.cacheProgress.message = "Waiting for API server... (\(attempt / 2)s)"
                 }
             }
-            
-            let request = URLRequest(url: healthURL, timeoutInterval: 2)
+
+            guard let currentHealthURL = URL(string: "\(self.baseURL)/health") else {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { tryConnect(attempt: attempt + 1) }
+                return
+            }
+            let request = URLRequest(url: currentHealthURL, timeoutInterval: 2)
             
             self.session.dataTask(with: request) { [weak self] _, response, error in
                 guard let self = self else { return }
@@ -221,7 +228,9 @@ class DataService: ObservableObject {
                     self.loadInvestmentRequests {}
                     self.loadAnnualBudgets {}
                 } else {
-                    if serverStartAttempts < 3 && attempt % 20 == 0 {
+                    if let updatedPort = DataService.readPortFile() {
+                        DispatchQueue.main.async { self.configure(port: updatedPort) }
+                    } else if serverStartAttempts < 3 && attempt % 20 == 0 {
                         serverStartAttempts += 1
                         self.startAPIServer { _ in }
                     }
