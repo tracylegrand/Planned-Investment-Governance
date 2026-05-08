@@ -35,6 +35,7 @@ struct InvestmentRequestsView: View {
         searchText = ""
         filterPendingMyApproval = false
         filterMyRequests = false
+        saveFiltersToDefaults()
     }
     
     private var currentFiscalQuarter: String {
@@ -564,9 +565,48 @@ struct InvestmentRequestsView: View {
             } else {
                 selectedIndustries = selectedIndustries.filter { availablePortfolios.contains($0) }
             }
+            if hasInitialized { saveFiltersToDefaults() }
+        }
+        .onChange(of: selectedIndustries) { _, _ in
+            if hasInitialized { saveFiltersToDefaults() }
+        }
+        .onChange(of: selectedQuarters) { _, _ in
+            if hasInitialized { saveFiltersToDefaults() }
+        }
+        .onChange(of: selectedStatus) { _, _ in
+            if hasInitialized { saveFiltersToDefaults() }
+        }
+        .onChange(of: filterPendingMyApproval) { _, _ in
+            if hasInitialized { saveFiltersToDefaults() }
+        }
+        .onChange(of: filterMyRequests) { _, _ in
+            if hasInitialized { saveFiltersToDefaults() }
         }
     }
         
+    private func saveFiltersToDefaults() {
+        let defaults = UserDefaults.standard
+        defaults.set(selectedTheater, forKey: "ig_filter_theater")
+        defaults.set(selectedStatus, forKey: "ig_filter_status")
+        defaults.set(Array(selectedIndustries), forKey: "ig_filter_industries")
+        defaults.set(Array(selectedQuarters), forKey: "ig_filter_quarters")
+        defaults.set(filterPendingMyApproval, forKey: "ig_filter_pending")
+        defaults.set(filterMyRequests, forKey: "ig_filter_my_requests")
+        defaults.set(true, forKey: "ig_filter_saved")
+    }
+    
+    private func loadFiltersFromDefaults() -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "ig_filter_saved") else { return false }
+        selectedTheater = defaults.string(forKey: "ig_filter_theater") ?? "All"
+        selectedStatus = defaults.string(forKey: "ig_filter_status") ?? "All"
+        selectedIndustries = Set(defaults.stringArray(forKey: "ig_filter_industries") ?? [])
+        selectedQuarters = Set(defaults.stringArray(forKey: "ig_filter_quarters") ?? [])
+        filterPendingMyApproval = defaults.bool(forKey: "ig_filter_pending")
+        filterMyRequests = defaults.bool(forKey: "ig_filter_my_requests")
+        return true
+    }
+    
     private func applyPassedFiltersOrInitialize() {
         let hasPassedStatus = !navigationState.passedStatus.isEmpty
         let hasPassedQuarters = !navigationState.passedQuarters.isEmpty
@@ -593,19 +633,21 @@ struct InvestmentRequestsView: View {
         } else if !hasInitialized {
             hasInitialized = true
             
-            selectedTheater = userSettings.defaultTheater
-            selectedIndustries = userSettings.defaultPortfolios
-            
-            switch userSettings.defaultQuarterSelection {
-            case "Current Quarter":
-                selectedQuarters = [currentFiscalQuarter]
-            case "Current Fiscal Year":
-                let fy = currentFiscalYearAndQuarter.year
-                selectedQuarters = Set((1...4).map { "FY\(fy)-Q\($0)" })
-            case "All Quarters":
-                selectedQuarters = []
-            default:
-                selectedQuarters = [currentFiscalQuarter]
+            if !loadFiltersFromDefaults() {
+                selectedTheater = userSettings.defaultTheater
+                selectedIndustries = userSettings.defaultPortfolios
+                
+                switch userSettings.defaultQuarterSelection {
+                case "Current Quarter":
+                    selectedQuarters = [currentFiscalQuarter]
+                case "Current Fiscal Year":
+                    let fy = currentFiscalYearAndQuarter.year
+                    selectedQuarters = Set((1...4).map { "FY\(fy)-Q\($0)" })
+                case "All Quarters":
+                    selectedQuarters = []
+                default:
+                    selectedQuarters = [currentFiscalQuarter]
+                }
             }
         }
     }

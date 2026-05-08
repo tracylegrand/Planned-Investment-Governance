@@ -32,7 +32,7 @@ ICON=$(jq -r '.icon' "$CONFIG_FILE")
 API_PORT=$(jq -r '.api_port' "$CONFIG_FILE")
 CACHE_DB=$(jq -r '.cache_db' "$CONFIG_FILE")
 
-APP_PATH="/Applications/My Apps/${APP_NAME}.app"
+APP_PATH="${HOME}/My Apps/${APP_NAME}.app"
 INFO_PLIST_TEMPLATE="${PROJECT_DIR}/Info.plist.template"
 
 echo "=========================================="
@@ -97,6 +97,7 @@ cp "$GENERATED_PLIST" "$APP_PATH/Contents/"
 ICON_FILE="${PROJECT_DIR}/Resources/${ICON}.icns"
 if [ -f "$ICON_FILE" ]; then
     cp "$ICON_FILE" "$APP_PATH/Contents/Resources/"
+    touch "$APP_PATH"
     echo "Copied icon: $ICON_FILE"
 else
     echo "Warning: Icon file not found: $ICON_FILE"

@@ -80,7 +80,7 @@ def create_icon_image(size, text_main="$$", text_sub="✓", color_top=(34, 139, 
     return result
 
 def main():
-    project_dir = Path("/Users/tlegrand/Documents/projects/Planned-Investment-Governance")
+    project_dir = Path("/Users/tlegrand/projects/Planned-Investment-Governance")
     resources_dir = project_dir / "Resources"
     iconset_dir = resources_dir / "AppIcon.iconset"
     
